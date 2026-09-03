@@ -1,5 +1,7 @@
 # Progress
 
+2026-09-03 19:25 · setup(linux): installed the native Tauri toolchain and pinned runtime resources, built and launched the release desktop with its OpenCode sidecar, and verified lint, typecheck, 252 Rust tests, and Clippy; the sole filtered SSH transport test and Rust 1.98 formatting drift are host/baseline issues and do not block the working application.
+
 2026-09-03 18:20 · setup: configured GitHub issue tracking, canonical triage labels, multi-context domain routing, and explicit upstream maintenance rules for the public Kitkitkittt/SciRsc repository.
 
 2026-09-03 17:50 · research: audited Imbad0202/academic-research-skills and retained only its revision-ledger and evidence-first re-review concepts as future references because wholesale integration duplicates existing skills, weakens OpenCode enforcement, and carries CC-BY-NC-4.0 constraints.
