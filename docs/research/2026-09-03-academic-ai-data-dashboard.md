@@ -21,7 +21,7 @@ Open Science Desktop `v0.5.1` is the foundation. It already provides the request
 
 Sources: [Open Science Desktop README](https://github.com/ai4s-research/open-science/blob/v0.5.1/README.md), [technical design](https://github.com/ai4s-research/open-science/blob/v0.5.1/docs/TECHNICAL_DESIGN.md), and [tool integration guide](https://github.com/ai4s-research/open-science/blob/v0.5.1/docs/CONNECT_YOUR_TOOLS.md).
 
-The application is cloned at tag `v0.5.1` on local branch `local/research-dashboard`. Other projects remain external because copying overlapping application code would make updates, licensing, dependency isolation, and provenance harder.
+The application baseline is tag `v0.5.1`; SciRsc development continues on `main`. Other projects remain external because copying overlapping application code would make updates, licensing, dependency isolation, and provenance harder.
 
 ## Source assessment
 

@@ -19,6 +19,6 @@ Issues and specs live in the public `Kitkitkittt/SciRsc` GitHub repository. Use 
 
 - “Publish to the issue tracker” means create a GitHub issue in `Kitkitkittt/SciRsc`.
 - “Fetch the relevant ticket” means read that issue and its comments.
-- A bare `#42` may be an issue or PR; try `gh pr view -R Kitkitkittt/SciRsc 42`, then `gh issue view`.
+- A bare `#42` may be an issue or PR; try `gh pr view -R Kitkitkittt/SciRsc 42`, then `gh issue view -R Kitkitkittt/SciRsc 42`.
 - `/wayfinder` uses one `wayfinder:map` issue, linked child issues, native dependencies when available, and `Blocked by:` lines otherwise.
 - Claim work by assigning the issue to `@me`; resolve it with a result comment before closing.
