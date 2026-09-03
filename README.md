@@ -38,6 +38,10 @@ runs, and review into one auditable desktop workflow.
 
 ---
 
+> **SciRsc repository note:** This personal academic AI/data research dashboard is
+> based on Open Science Desktop `v0.5.1`. Upstream provenance and update rules are
+> documented in [`docs/agents/upstream.md`](./docs/agents/upstream.md).
+
 ## News
 
 - **2026-08-18** — 🖥️ **Runs without a screen, and the terminal command comes with it.** `osd server` starts the whole workbench — workspace, agent runtime, and the *same* web UI — on a machine with no display, and `osd session send … --wait` drives it from a script or another agent. `osd` ships inside the desktop installer and puts itself on your PATH on first launch; on a server the archive needs nothing installed. Models, keys and approvals are all configurable from the terminal (`osd model`, `osd auth`, `osd approval`).

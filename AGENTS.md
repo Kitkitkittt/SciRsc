@@ -56,6 +56,28 @@ local workspace + SQLite + JSONL provenance.
 - API keys go to the OS keychain / credential manager; never into provenance,
   logs, crash reports, git, or exported projects.
 
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in `Kitkitkittt/SciRsc` GitHub Issues. See
+`docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the five canonical Matt Pocock triage labels unchanged. See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a multi-context monorepo; route through `CONTEXT-MAP.md` and read only
+relevant context docs and ADRs. See `docs/agents/domain.md`.
+
+### Upstream source
+
+This repository derives from `ai4s-research/open-science`; review
+`docs/agents/upstream.md` before syncing upstream changes.
+
 ## Working conventions
 
 - Default working language for discussion is Chinese; **all project files and
