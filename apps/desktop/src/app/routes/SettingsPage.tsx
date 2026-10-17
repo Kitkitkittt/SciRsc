@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   ChevronRight,
@@ -21,6 +21,7 @@ import type {
 } from "@ai4s/sdk";
 import { OPENCODE_VERSION } from "@ai4s/sdk";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useParams } from "react-router-dom";
 import { useUiStore, ZOOM_MAX, ZOOM_MIN } from "@/lib/store";
 import { shippedLocales } from "@/i18n/config";
@@ -65,11 +66,14 @@ import { listProvidersWithAvailability } from "@/lib/zenModels";
 import { RemoteComputeCard } from "@/components/settings/RemoteComputeCard";
 import { RemoteAccessCard } from "@/components/settings/RemoteAccessCard";
 import { TerminalCliCard } from "@/components/settings/TerminalCliCard";
+import { ConversationSyncCard } from "@/components/settings/ConversationSyncCard";
 import { AcpAgentsCard } from "@/components/settings/AcpAgentsCard";
 import { ModalCard } from "@/components/settings/ModalCard";
 import { DataFlowCard } from "@/components/settings/DataFlowCard";
+import { ComputerUseCard } from "@/components/settings/ComputerUseCard";
+import { UserBrowserCard } from "@/components/settings/UserBrowserCard";
 import { ModelBrowser } from "@/components/settings/ModelBrowser";
-import { fallbackDefaultModel } from "@/components/settings/modelCatalog";
+import { fallbackDefaultModel, flattenModelOptions } from "@/components/settings/modelCatalog";
 import { ProviderManagerCard } from "@/components/settings/ProviderManagerCard";
 import { AgentModelsCard } from "@/components/settings/AgentModelsCard";
 import { MemoryCard } from "@/components/settings/MemoryCard";
@@ -84,15 +88,64 @@ import {
 } from "@/lib/browser";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/cn";
+import {
+  IconChevronDownOutlineRegular,
+  IconChevronUpOutlineRegular,
+  IconDarkOutlineMedium,
+  IconFollowsystemOutlineMedium,
+  IconLightOutlineMedium,
+  IconPersonalizationOutlineMedium,
+} from "@/components/icons/dsh";
+import appearanceCss from "@/components/settings/Appearance.module.css";
+import { CONTENT_FONT_MAX, CONTENT_FONT_MIN, type Theme } from "@/lib/store";
+
+/** Appearance cubes in DSH's order (Light, Dark, System), with this app's
+ *  warm palette beside light. */
+const THEME_CUBES: readonly { mode: Theme; Icon: typeof IconLightOutlineMedium }[] = [
+  // eslint-disable-next-line i18next/no-literal-string -- theme-mode keys, not display text
+  { mode: "light", Icon: IconLightOutlineMedium },
+  // eslint-disable-next-line i18next/no-literal-string -- theme-mode keys, not display text
+  { mode: "warm", Icon: IconPersonalizationOutlineMedium },
+  // eslint-disable-next-line i18next/no-literal-string -- theme-mode keys, not display text
+  { mode: "dark", Icon: IconDarkOutlineMedium },
+  // eslint-disable-next-line i18next/no-literal-string -- theme-mode keys, not display text
+  { mode: "system", Icon: IconFollowsystemOutlineMedium },
+];
 
 /**
  * Settings. ONE configuration surface: everything talks to the bundled
  * OpenCode's own config/auth API — no separate "model key" concept.
  */
+/** One field of a form: its name on the left, the control on the right.
+ *
+ *  A label, not a placeholder. Placeholder text disappears the moment a field
+ *  has a value, which is exactly when a reader most needs to know what they
+ *  are looking at — six of them stacked is a form that cannot be read back. */
+function FieldRow({
+  label,
+  htmlFor,
+  children,
+}: {
+  label: string;
+  htmlFor: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5 border-t border-faint px-3 py-2.5 sm:flex-row sm:items-center sm:gap-3">
+      <label htmlFor={htmlFor} className="shrink-0 text-[13px] text-muted sm:w-[8.5rem]">
+        {label}
+      </label>
+      <div className="flex min-w-0 flex-1 items-center gap-2">{children}</div>
+    </div>
+  );
+}
+
 export function SettingsPage() {
   // Which settings section is on screen — the sidebar is the navigation.
   const section = resolveSection(useParams().section);
   const theme = useUiStore((s) => s.theme);
+  const contentFontSize = useUiStore((s) => s.contentFontSize);
+  const setContentFontSize = useUiStore((s) => s.setContentFontSize);
   const setTheme = useUiStore((s) => s.setTheme);
   const locale = useUiStore((s) => s.locale);
   const setLocale = useUiStore((s) => s.setLocale);
@@ -116,6 +169,10 @@ export function SettingsPage() {
   const runtimeKind = useRuntimeStore((s) => s.runtimeKind);
   const autoReview = useRuntimeStore((s) => s.autoReview);
   const setAutoReview = useRuntimeStore((s) => s.setAutoReview);
+  const turnNotify = useRuntimeStore((s) => s.turnNotify);
+  const setTurnNotify = useRuntimeStore((s) => s.setTurnNotify);
+  const stallGuard = useRuntimeStore((s) => s.stallGuard);
+  const setStallGuard = useRuntimeStore((s) => s.setStallGuard);
   const connected = status === "ready";
   const updateEnabled = useUpdateStore((s) => s.enabled);
   const setUpdateEnabled = useUpdateStore((s) => s.setEnabled);
@@ -202,7 +259,24 @@ export function SettingsPage() {
   const [cContexts, setCContexts] = useState<Record<string, number>>({});
 
   // Connect-a-provider flow state.
-  const [providerManagerOpen, setProviderManagerOpen] = useState(false);
+  // The catalog is a CHANGE flow, not a permanent fixture: the page's job at
+  // rest is to say which model is in force, which a scrolling list of forty
+  // never did. Opened by "Change", closed by a successful pick.
+  const [modelBrowserOpen, setModelBrowserOpen] = useState(false);
+  // The default model as a reader sees it: its own name on the first line, and
+  // where it comes from underneath. A configured model the catalog has never
+  // heard of still gets named — by its raw id, which is all there is.
+  const currentModel = useMemo(
+    () =>
+      defaultModel ? flattenModelOptions(providers).find((o) => o.key === defaultModel) : undefined,
+    [providers, defaultModel],
+  );
+  const currentModelName = currentModel?.modelName ?? defaultModel;
+  const currentModelDetail = currentModel
+    ? `${currentModel.providerName}${
+        currentModel.modelName !== currentModel.modelID ? ` · ${currentModel.modelID}` : ""
+      }`
+    : null;
   const [connectQuery, setConnectQuery] = useState("");
   const [keyInput, setKeyInput] = useState("");
   const [bedrockRegion, setBedrockRegion] = useState("");
@@ -365,7 +439,8 @@ export function SettingsPage() {
     }
     void applyProxy(mode, "");
   };
-  const validProxyUrl = /^(https?|socks5):\/\/\S+:\d+\/?$/i.test(proxyUrlInput.trim());
+  // HTTP(S) only: the Bun inside OpenCode fails every fetch on a SOCKS proxy.
+  const validProxyUrl = /^https?:\/\/\S+:\d+\/?$/i.test(proxyUrlInput.trim());
 
   // uv download mirrors, used only when provisioning Python tools (Jupyter,
   // science databases). Optional; a blank field clears that mirror.
@@ -896,7 +971,9 @@ export function SettingsPage() {
                   proxy.mode === "none"
                     ? t("runtime.proxyDirectHint")
                     : proxy.effective
-                      ? t("runtime.proxyEffective", { url: proxy.effective })
+                      ? /^socks/i.test(proxy.effective)
+                        ? t("runtime.proxySocksUnsupported", { url: proxy.effective })
+                        : t("runtime.proxyEffective", { url: proxy.effective })
                       : t("runtime.proxyNoneDetected")
                 }
                 control={
@@ -913,6 +990,18 @@ export function SettingsPage() {
                   </select>
                 }
               >
+                {proxy.restartNeeded && (
+                  <div className="mt-2.5 flex items-center gap-2">
+                    <p className="flex-1 text-xs text-muted">{t("runtime.proxyRestartNeeded")}</p>
+                    <button
+                      className={btnAccent()}
+                      onClick={() => void applyProxy(proxy.mode, proxy.url)}
+                      disabled={busy}
+                    >
+                      {t("runtime.proxyApply")}
+                    </button>
+                  </div>
+                )}
                 {proxy.mode === "custom" && (
                   <div className="mt-2.5 flex items-center gap-2">
                     <input
@@ -976,27 +1065,54 @@ export function SettingsPage() {
 
         {/* ---- Models ---- */}
         {section === "models" && (
-        <Section title={t("model.title")} hint={t("model.hint")}>
+        <Section title={t("model.title")} hint={t("model.hint")} flush>
           {!modelSurfaceAvailable ? (
-            <p className="text-[13px] text-muted">{t("model.connectPrompt")}</p>
+            <p className="px-4 py-3 text-[13px] text-muted">{t("model.connectPrompt")}</p>
           ) : catalogState === "unavailable" ? (
-            <p className="text-[13px] text-muted">{t("model.catalogUnavailable")}</p>
+            <p className="px-4 py-3 text-[13px] text-muted">{t("model.catalogUnavailable")}</p>
           ) : catalogState === "loading" ? (
-            <p className="text-[13px] text-muted">{t("model.catalogLoading")}</p>
+            <p className="px-4 py-3 text-[13px] text-muted">{t("model.catalogLoading")}</p>
           ) : (
-            <ModelBrowser
-              providers={providers}
-              defaultModel={defaultModel}
-              busy={modelControlsBusy}
-              onSelect={saveModel}
-              onManageProviders={() => setProviderManagerOpen(true)}
-            />
+            <>
+              {/* What is in force, said once and plainly. Everything else on
+                  this page is a change to it. */}
+              <div className="flex items-center gap-3 px-4 py-3.5">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[13px] font-medium text-text">
+                    {currentModelName ?? t("model.notSet")}
+                  </div>
+                  {currentModelDetail && (
+                    <div className="mt-0.5 truncate text-xs text-muted">{currentModelDetail}</div>
+                  )}
+                </div>
+                <button
+                  onClick={() => setModelBrowserOpen((open) => !open)}
+                  aria-expanded={modelBrowserOpen}
+                  className="shrink-0 rounded-input border border-border bg-surface px-2.5 py-1.5 text-xs text-text transition-colors hover:bg-surface-2"
+                >
+                  {modelBrowserOpen ? t("common:actions.cancel") : t("model.change")}
+                </button>
+              </div>
+              {modelBrowserOpen && (
+                <div className="border-t border-faint">
+                  <ModelBrowser
+                    providers={providers}
+                    defaultModel={defaultModel}
+                    busy={modelControlsBusy}
+                    onSelect={async (model) => {
+                      const ok = await saveModel(model);
+                      // A pick is the end of the change flow; leaving the list
+                      // open would hide the answer it was opened to give.
+                      if (ok) setModelBrowserOpen(false);
+                      return ok;
+                    }}
+                  />
+                </div>
+              )}
+            </>
           )}
         </Section>
         )}
-
-        {/* ---- One model per agent (a fast reviewer, a strong main agent) ---- */}
-        {section === "models" && isTauri && <AgentModelsCard providers={providers} />}
 
         {/* ---- Persistent memory layers ---- */}
         {section === "memory" && <MemoryCard />}
@@ -1008,8 +1124,6 @@ export function SettingsPage() {
           // The web client can only read this surface, so say so up front
           // instead of describing writes it cannot make (#119).
           hint={isGatewayWeb ? t("providers.webHint") : undefined}
-          expanded={providerManagerOpen}
-          onExpandedChange={setProviderManagerOpen}
         >
           {!connected ? (
             <p className="px-4 py-3 text-[13px] text-muted">{t("providers.connectPrompt")}</p>
@@ -1068,7 +1182,16 @@ export function SettingsPage() {
                   </p>
                 ) : (
                   <>
-                  {/* Connect a provider */}
+                  {/* Connect a provider.
+                      A labelled band, not just another row: above it is what IS
+                      connected, below it is a form that CHANGES that. Running
+                      the two together is what made this card unreadable — the
+                      search field looked like a filter over the list above it. */}
+                  <div className="border-t border-faint bg-surface-2/50 px-3 py-2">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                      {t("providers.addTitle")}
+                    </div>
+                  </div>
                   <div className="border-t border-faint p-3">
                     <div className="relative">
                       <Search
@@ -1233,64 +1356,73 @@ export function SettingsPage() {
                       </span>
                     </button>
                     {showCustom && (
-                      <div className="space-y-2 px-3 pb-3">
-                        <div className="flex gap-2">
+                      /* Labelled rows, not a stack of placeholder-only boxes:
+                         a placeholder is gone the moment you type into it, so
+                         six of them side by side leave a form nobody can read
+                         back. Same label→control grammar as every other row on
+                         this page. */
+                      <div>
+                        <FieldRow htmlFor="custom-name" label={t("providers.fieldName")}>
                           <input
+                            id="custom-name"
                             value={cName}
                             onChange={(e) => setCName(e.target.value)}
                             placeholder={t("providers.customNamePlaceholder")}
-                            className={inputCls("flex-1")}
+                            className={inputCls("min-w-0 flex-1")}
                           />
+                        </FieldRow>
+                        <FieldRow htmlFor="custom-style" label={t("providers.fieldApiStyle")}>
                           <select
+                            id="custom-style"
                             value={cNpm}
                             onChange={(e) => setCNpm(e.target.value)}
-                            className={selectCls("w-[190px]")}
+                            className={selectCls("min-w-0 flex-1")}
                           >
                             <option value="@ai-sdk/openai-compatible">{t("providers.openaiCompatible")}</option>
                             <option value="@ai-sdk/anthropic">{t("providers.anthropicCompatible")}</option>
                           </select>
-                        </div>
-                        <input
-                          value={cUrl}
-                          onChange={(e) => setCUrl(e.target.value)}
-                          placeholder={t("providers.customUrlPlaceholder")}
-                          className={inputCls("w-full font-mono")}
-                        />
-                        <div className="flex gap-2">
+                        </FieldRow>
+                        <FieldRow htmlFor="custom-url" label={t("providers.fieldBaseUrl")}>
                           <input
+                            id="custom-url"
+                            value={cUrl}
+                            onChange={(e) => setCUrl(e.target.value)}
+                            placeholder={t("providers.customUrlPlaceholder")}
+                            className={inputCls("min-w-0 flex-1 font-mono")}
+                          />
+                        </FieldRow>
+                        <FieldRow htmlFor="custom-key" label={t("providers.fieldApiKey")}>
+                          <input
+                            id="custom-key"
                             type="password"
                             value={cKey}
                             onChange={(e) => setCKey(e.target.value)}
                             placeholder={t("providers.customKeyPlaceholder")}
-                            className={inputCls("flex-1 font-mono")}
+                            className={inputCls("min-w-0 flex-1 font-mono")}
                           />
+                        </FieldRow>
+                        <FieldRow htmlFor="custom-models" label={t("providers.fieldModels")}>
                           <input
+                            id="custom-models"
                             value={cModels}
                             onChange={(e) => setCModels(e.target.value)}
                             placeholder={t("providers.customModelsPlaceholder")}
-                            className={inputCls("flex-1 font-mono")}
+                            className={inputCls("min-w-0 flex-1 font-mono")}
                           />
-                        </div>
-                        <div className="flex gap-2">
-                          <input
-                            inputMode="numeric"
-                            value={cCtx}
-                            onChange={(e) => setCCtx(e.target.value.replace(/[^0-9]/g, ""))}
-                            placeholder={t("providers.customContextPlaceholder")}
-                            className={inputCls("flex-1 font-mono")}
-                          />
+                          {/* Beside the field it fills, not stranded next to the
+                              context window it has nothing to do with. */}
                           {isTauri && (
                             <button
-                              className={btnGhost()}
+                              className={btnGhost("shrink-0")}
                               onClick={() => void fetchCustomModels()}
                               disabled={cDetecting || !cUrl.trim()}
                             >
                               {cDetecting ? t("providers.fetchingModels") : t("providers.fetchModels")}
                             </button>
                           )}
-                        </div>
+                        </FieldRow>
                         {cDetected !== null && (
-                          <div className="flex flex-wrap gap-1.5">
+                          <div className="flex flex-wrap gap-1.5 border-t border-faint px-3 py-2.5 sm:pl-[9.6rem]">
                             {cDetected.length === 0 && (
                               <span className="text-xs text-muted">{t("providers.noModelsFound")}</span>
                             )}
@@ -1317,9 +1449,24 @@ export function SettingsPage() {
                             })}
                           </div>
                         )}
-                        <button className={btnAccent()} onClick={() => void saveCustom()} disabled={busy}>
-                          {t("providers.addEndpoint")}
-                        </button>
+                        <FieldRow htmlFor="custom-context" label={t("providers.fieldContext")}>
+                          <input
+                            id="custom-context"
+                            inputMode="numeric"
+                            value={cCtx}
+                            onChange={(e) => setCCtx(e.target.value.replace(/[^0-9]/g, ""))}
+                            placeholder={t("providers.customContextPlaceholder")}
+                            className={inputCls("min-w-0 flex-1 font-mono")}
+                          />
+                        </FieldRow>
+                        <div className="flex items-center justify-end gap-2 border-t border-faint px-3 py-2.5">
+                          <button className={btnGhost()} onClick={() => setShowCustom(false)}>
+                            {t("common:actions.cancel")}
+                          </button>
+                          <button className={btnAccent()} onClick={() => void saveCustom()} disabled={busy}>
+                            {t("providers.addEndpoint")}
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -1342,6 +1489,11 @@ export function SettingsPage() {
         </ProviderManagerCard>
         )}
 
+        {/* ---- One model per agent (a fast reviewer, a strong main agent) ----
+             After Providers on purpose: those supply the models these rows pick
+             from, so a reader meets the supply before the assignment. */}
+        {section === "models" && isTauri && <AgentModelsCard providers={providers} />}
+
         {/* ---- MCP servers ---- */}
         {section === "connectors" && (
         <Section title={t("mcp.title")} hint={t("mcp.hint")} flush>
@@ -1353,7 +1505,13 @@ export function SettingsPage() {
               {isTauri &&
                 SCIENCE_CONNECTORS.filter((c) => !mcpServers.some((s) => s.name === c.id)).map(
                   (c) => {
-                    const keyMissing = Boolean(c.apiKeyEnv) && !connectorKeys[c.id]?.trim();
+                    // Only a local connector takes an API key — narrow once so the
+                    // rest of this card can read plain optional fields either way.
+                    const apiKeyEnv = c.type === "remote" ? undefined : c.apiKeyEnv;
+                    const apiKeyUrl = c.type === "remote" ? undefined : c.apiKeyUrl;
+                    const apiKeyRequired = c.type === "remote" ? false : c.apiKeyRequired;
+                    const installNote = c.type === "remote" ? undefined : c.installNote;
+                    const keyMissing = Boolean(apiKeyEnv) && !connectorKeys[c.id]?.trim();
                     return (
                       <div
                         key={c.id}
@@ -1367,12 +1525,12 @@ export function SettingsPage() {
                               {c.discipline}
                             </span>
                             <span className="ml-1.5 rounded bg-surface-2 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted ring-1 ring-border">
-                              {t("mcp.openSource")}
+                              {c.type === "remote" ? t("mcp.official") : t("mcp.openSource")}
                             </span>
                             <div className="truncate text-xs text-muted">{c.description}</div>
                             <div className="truncate font-mono text-[11px] text-muted/70">
                               {c.source}
-                              {c.installNote ? ` · ${c.installNote}` : ""}
+                              {installNote ? ` · ${installNote}` : ""}
                             </div>
                           </div>
                           <button
@@ -1390,7 +1548,7 @@ export function SettingsPage() {
                             )}
                           </button>
                         </div>
-                        {c.apiKeyEnv && (
+                        {apiKeyEnv && (
                           <div className="mt-2 flex items-center gap-2 pl-6">
                             <input
                               type="password"
@@ -1398,17 +1556,18 @@ export function SettingsPage() {
                               onChange={(e) =>
                                 setConnectorKeys((k) => ({ ...k, [c.id]: e.target.value }))
                               }
-                              placeholder={`${c.apiKeyEnv} ${t("mcp.freeKeySuffix")}`}
+                              placeholder={`${apiKeyEnv} ${apiKeyRequired ? t("mcp.requiredSuffix") : t("mcp.freeKeySuffix")}`}
                               className="h-8 min-w-0 flex-1 rounded-input border border-transparent bg-surface-2 px-2 font-mono text-[12px] text-text outline-none placeholder:text-muted/60 focus:border-accent/55 focus:bg-surface"
                             />
-                            {c.apiKeyUrl && (
+                            {apiKeyUrl && (
                               <a
-                                href={c.apiKeyUrl}
+                                href={apiKeyUrl}
                                 target="_blank"
                                 rel="noreferrer"
                                 className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] text-accent hover:underline"
                               >
-                                <ExternalLink size={11} /> {t("mcp.getFreeKey")}
+                                <ExternalLink size={11} />{" "}
+                                {apiKeyRequired ? t("mcp.learnMore") : t("mcp.getFreeKey")}
                               </a>
                             )}
                           </div>
@@ -1730,6 +1889,108 @@ export function SettingsPage() {
         </Section>
         )}
 
+        {/* ---- Turn-completion notifications ---- */}
+        {/* Desktop only: the gateway web client has no native notifications.
+            Off by default; fires one system notification per settled turn. */}
+        {section === "general" && isTauri && runtimeKind !== "acp" && (
+          <Section title={t("notify.title")} hint={t("notify.hint")} flush>
+            <div className="divide-y divide-faint">
+              <Row
+                title={t("notify.turnCompleteTitle")}
+                hint={t("notify.turnCompleteHint")}
+                control={
+                  <Switch
+                    checked={turnNotify}
+                    onChange={setTurnNotify}
+                    label={t("notify.turnCompleteTitle")}
+                  />
+                }
+              />
+            </div>
+          </Section>
+        )}
+
+        {/* ---- Stall guard (#121) ---- */}
+        {/* Watch for a turn that looks stuck — silent too long (Channel A) or
+            repeating the same tool call with identical results (Channel B) —
+            and offer Keep waiting / Stop. Never auto-interrupts. Available on
+            the web too (the warning is inline there; no system notification). */}
+        {section === "general" && runtimeKind !== "acp" && (
+          <Section
+            title={t("stall.title")}
+            hint={t("stall.hint") + (isGatewayWeb ? ` ${t("stall.webNote")}` : "")}
+            flush
+          >
+            <div className="divide-y divide-faint">
+              <Row
+                title={t("stall.enableTitle")}
+                hint={t("stall.enableHint")}
+                control={
+                  <Switch
+                    checked={stallGuard.enabled}
+                    onChange={(on) => setStallGuard({ enabled: on })}
+                    label={t("stall.enableTitle")}
+                  />
+                }
+              />
+              {stallGuard.enabled && (
+                <>
+                  {/* Channel A — silence. Presets in minutes; the value shown
+                      is whatever the user last chose, preset or custom. */}
+                  <Row
+                    title={t("stall.silenceLabel")}
+                    hint={t("stall.silenceHint")}
+                  >
+                    <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center sm:gap-3">
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs text-muted">{t("stall.channelA")}</span>
+                        <Switch
+                          checked={stallGuard.channelAEnabled}
+                          onChange={(on) => setStallGuard({ channelAEnabled: on })}
+                          label={t("stall.channelA")}
+                        />
+                      </div>
+                      {stallGuard.channelAEnabled && (
+                        <SilenceThresholdControl
+                          minutes={stallGuard.silenceMinutes}
+                          onChange={(m) => setStallGuard({ silenceMinutes: m })}
+                          t={t}
+                        />
+                      )}
+                    </div>
+                  </Row>
+                  {/* Channel B — repetition */}
+                  <Row title={t("stall.repeatLabel")}>
+                    <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center sm:gap-3">
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs text-muted">{t("stall.channelB")}</span>
+                        <Switch
+                          checked={stallGuard.channelBEnabled}
+                          onChange={(on) => setStallGuard({ channelBEnabled: on })}
+                          label={t("stall.channelB")}
+                        />
+                      </div>
+                      {stallGuard.channelBEnabled && (
+                        <RepeatThresholdControl
+                          threshold={stallGuard.repeatThreshold}
+                          onChange={(k) => setStallGuard({ repeatThreshold: k })}
+                          t={t}
+                        />
+                      )}
+                    </div>
+                  </Row>
+                </>
+              )}
+            </div>
+          </Section>
+        )}
+
+        {/* ---- Conversation sync across the user's own machines (#124) ---- */}
+        {/* Desktop only: it needs a folder on this machine and a local runtime
+            to import into, so the gateway web client hides it rather than
+            offering a control that cannot work. */}
+        {section === "general" && isTauri && runtimeKind !== "acp" && <ConversationSyncCard />}
+
         {/* ---- Which agent this app drives: OpenCode, or an ACP agent (#14) ---- */}
         {section === "runtime" && <AcpAgentsCard />}
 
@@ -1797,6 +2058,12 @@ export function SettingsPage() {
           </>
         )}
 
+        {/* A browser the user installed themselves, reachable from the shell. */}
+        {section === "browser" && <UserBrowserCard />}
+
+        {/* ---- Computer use (the agent driving apps on this machine) ---- */}
+        {section === "computer" && <ComputerUseCard />}
+
         {/* ---- Remote access (API gateway: CLI / LAN web / tunnel) ---- */}
         {section === "remote" && (
           <>
@@ -1812,25 +2079,56 @@ export function SettingsPage() {
         {section === "appearance" && (
         <Section title={t("appearance.title")} flush>
           <div className="divide-y divide-faint">
-            <Row title={t("appearance.themeLabel")}
-              control={
-                <div className="inline-flex shrink-0 gap-0.5">
-                  {/* eslint-disable-next-line i18next/no-literal-string -- internal theme-mode keys, not display text (the visible label is t(`appearance.theme.${mode}`)) */}
-                  {(["light", "warm", "dark"] as const).map((mode) => (
+            {/* DeepSeek Harness's appearance cubes; warm is this app's own palette. */}
+            <div className={appearanceCss.group}>
+              <div className={appearanceCss.title}>{t("appearance.themeLabel")}</div>
+              <div className={appearanceCss.cubeRow}>
+                {THEME_CUBES.map(({ mode, Icon }) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    className={cn(appearanceCss.themeCube, theme === mode && appearanceCss.selected)}
+                    aria-pressed={theme === mode}
+                    onClick={() => setTheme(mode)}
+                  >
+                    <Icon />
+                    {t(`appearance.theme.${mode}`)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className={appearanceCss.row}>
+              <div className={appearanceCss.rowText}>
+                <div className={appearanceCss.title}>{t("appearance.fontSize.title")}</div>
+                <div className={appearanceCss.desc}>{t("appearance.fontSize.description")}</div>
+              </div>
+              <div className={appearanceCss.control}>
+                <div className={appearanceCss.stepper}>
+                  <span className={appearanceCss.value}>{contentFontSize}</span>
+                  <span className={appearanceCss.arrows}>
                     <button
-                      key={mode}
-                      onClick={() => setTheme(mode)}
-                      className={cn(
-                        "rounded-[7px] px-4 py-1.5 text-[13px] transition-colors",
-                        theme === mode ? "bg-surface-2 text-text" : "text-muted hover:text-text",
-                      )}
+                      type="button"
+                      className={appearanceCss.arrow}
+                      aria-label={t("appearance.fontSize.increase")}
+                      disabled={contentFontSize >= CONTENT_FONT_MAX}
+                      onClick={() => setContentFontSize(contentFontSize + 1)}
                     >
-                      {t(`appearance.theme.${mode}`)}
+                      <IconChevronUpOutlineRegular size={9} />
                     </button>
-                  ))}
+                    <button
+                      type="button"
+                      className={appearanceCss.arrow}
+                      aria-label={t("appearance.fontSize.decrease")}
+                      disabled={contentFontSize <= CONTENT_FONT_MIN}
+                      onClick={() => setContentFontSize(contentFontSize - 1)}
+                    >
+                      <IconChevronDownOutlineRegular size={9} />
+                    </button>
+                  </span>
                 </div>
-              }
-            />
+                <span className={appearanceCss.unit}>{t("appearance.fontSize.unit")}</span>
+              </div>
+            </div>
             <Row title={t("language.label")}
               control={
                 <select
@@ -2005,3 +2303,145 @@ const btnAccent = (extra = "") =>
     "text-accent-fg transition-colors hover:bg-accent/90 disabled:bg-accent/50",
     extra,
   );
+
+/** Preset silence thresholds (Channel A), in minutes. The dropdown offers the
+ *  common stops; anything else falls through to a free-form minute input. */
+const SILENCE_PRESET_MIN = [10, 30, 60, 180, 600] as const;
+
+/** Preset repetition counts (Channel B). */
+const REPEAT_PRESETS = [3, 5, 10, 30] as const;
+
+/** Render a minute value readably: whole hours as "n h", otherwise "n min". */
+function formatMinutes(minutes: number, t: TFunction<["settings", "common"]>): string {
+  if (minutes >= 60 && minutes % 60 === 0) {
+    return `${minutes / 60} ${t("stall.hoursUnit")}`;
+  }
+  return `${minutes} ${t("stall.silenceUnit")}`;
+}
+
+/** Channel A's threshold picker: preset dropdown + free-form minutes when the
+ *  user picks "Custom…" (or the stored value is not a preset). Input is
+ *  clamped to [1, 1440] minutes so a stray keystroke or hostile value cannot
+ *  break the feature (0 would warn instantly; a huge value would never warn).
+ *
+ *  "Custom…" is a real UI mode, not derived from the value alone: picking it
+ *  shows the free-form input even while the current value still matches a
+ *  preset (otherwise the select would snap back the instant it was opened).
+ *  Once in custom mode, typing a value that happens to equal a preset does NOT
+ *  kick you out — the user is mid-edit and the input must not vanish under
+ *  their cursor. Choosing an explicit preset option is what leaves custom mode. */
+function SilenceThresholdControl({
+  minutes,
+  onChange,
+  t,
+}: {
+  minutes: number;
+  onChange: (minutes: number) => void;
+  t: TFunction<["settings", "common"]>;
+}) {
+  const [customMode, setCustomMode] = useState(
+    !(SILENCE_PRESET_MIN as readonly number[]).includes(minutes),
+  );
+  return (
+    <div className="flex items-center gap-2">
+      <select
+        className={selectCls("h-8 w-[130px]")}
+        value={customMode ? "custom" : String(minutes)}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v === "custom") setCustomMode(true);
+          else {
+            setCustomMode(false);
+            onChange(Number(v));
+          }
+        }}
+        aria-label={t("stall.silenceLabel")}
+      >
+        {SILENCE_PRESET_MIN.map((m) => (
+          <option key={m} value={m}>
+            {formatMinutes(m, t)}
+          </option>
+        ))}
+        <option value="custom">{t("stall.custom")}</option>
+      </select>
+      {customMode && (
+        <div className="flex items-center gap-1.5">
+          <input
+            type="number"
+            min={1}
+            max={1440}
+            value={minutes}
+            onChange={(e) => {
+              const raw = Number(e.target.value);
+              onChange(Number.isFinite(raw) ? Math.max(1, Math.min(1440, raw)) : 1);
+            }}
+            className={cn(inputCls("w-20 text-right"), "pr-2")}
+            aria-label={t("stall.silenceCustomHint")}
+            title={t("stall.silenceCustomHint")}
+          />
+          <span className="shrink-0 text-xs text-muted">{t("stall.silenceUnit")}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Channel B's threshold picker: preset dropdown + free-form count when the
+ *  user picks "Custom…". Clamped to [2, 100] — below 2 is not a "repeat", and
+ *  above 100 the guard would effectively never fire. Same custom-mode rules as
+ *  the silence picker above. */
+function RepeatThresholdControl({
+  threshold,
+  onChange,
+  t,
+}: {
+  threshold: number;
+  onChange: (threshold: number) => void;
+  t: TFunction<["settings", "common"]>;
+}) {
+  const [customMode, setCustomMode] = useState(
+    !(REPEAT_PRESETS as readonly number[]).includes(threshold),
+  );
+  return (
+    <div className="flex items-center gap-2">
+      <select
+        className={selectCls("h-8 w-[110px]")}
+        value={customMode ? "custom" : String(threshold)}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v === "custom") setCustomMode(true);
+          else {
+            setCustomMode(false);
+            onChange(Number(v));
+          }
+        }}
+        aria-label={t("stall.repeatLabel")}
+      >
+        {REPEAT_PRESETS.map((k) => (
+          <option key={k} value={k}>
+            {k} {t("stall.repeatUnit")}
+          </option>
+        ))}
+        <option value="custom">{t("stall.custom")}</option>
+      </select>
+      {customMode && (
+        <div className="flex items-center gap-1.5">
+          <input
+            type="number"
+            min={2}
+            max={100}
+            value={threshold}
+            onChange={(e) => {
+              const raw = Number(e.target.value);
+              onChange(Number.isFinite(raw) ? Math.max(2, Math.min(100, raw)) : 2);
+            }}
+            className={cn(inputCls("w-16 text-right"), "pr-2")}
+            aria-label={t("stall.repeatCustomHint")}
+            title={t("stall.repeatCustomHint")}
+          />
+          <span className="shrink-0 text-xs text-muted">{t("stall.repeatUnit")}</span>
+        </div>
+      )}
+    </div>
+  );
+}

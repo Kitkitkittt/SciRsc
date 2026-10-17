@@ -3,5 +3,21 @@
     "save": "Save",
     "cancel": "Cancel",
     "remove": "Remove"
+  },
+  "runtime": {
+    "compact": {
+      "busy": "Wait for the current turn to finish before compressing.",
+      "error": "Could not compress the context.",
+      "done": "Context compressed. The next reply uses the compacted conversation."
+    }
+  },
+  "linkMenu": {
+    "openFile": "Open file",
+    "openDefault": "Open with default app",
+    "openLink": "Open link",
+    "copyLink": "Copy link",
+    "copyPath": "Copy path",
+    "copied": "Copied",
+    "click": "Click"
   }
 }

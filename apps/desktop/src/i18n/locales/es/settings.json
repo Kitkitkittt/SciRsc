@@ -9,6 +9,7 @@
     "compute": "Cómputo",
     "privacy": "Privacidad",
     "browser": "Navegador",
+    "computer": "Uso del equipo",
     "remote": "Acceso remoto",
     "memory": "Memoria",
     "desktopOnly": "Esta sección está disponible en la app de escritorio."
@@ -19,7 +20,8 @@
     "theme": {
       "light": "Claro",
       "warm": "Cálido",
-      "dark": "Oscuro"
+      "dark": "Oscuro",
+      "system": "Sistema"
     },
     "zoom": {
       "label": "Zoom",
@@ -27,6 +29,13 @@
       "in": "Acercar",
       "out": "Alejar",
       "reset": "Restablecer"
+    },
+    "fontSize": {
+      "title": "Tamaño de letra",
+      "description": "Solo afecta al contenido de la conversación",
+      "unit": "px",
+      "increase": "Aumentar tamaño",
+      "decrease": "Reducir tamaño"
     }
   },
   "language": {
@@ -47,9 +56,12 @@
     "proxySystem": "Seguir el sistema",
     "proxyCustom": "Personalizado…",
     "proxyNone": "Directo (sin proxy)",
-    "proxyPlaceholder": "http://127.0.0.1:7890 / socks5://host:port",
+    "proxyPlaceholder": "http://127.0.0.1:7890",
     "proxyDirectHint": "Todas las conexiones del runtime del agente van directas.",
     "proxyEffective": "Enrutando a través de {{url}}",
+    "proxySocksUnsupported": "{{url}} es un proxy SOCKS, que el entorno del agente no puede usar: todas las conexiones fallarían. Usa el puerto HTTP de tu proxy (Clash: el puerto mixto, p. ej. http://127.0.0.1:7890).",
+    "proxyRestartNeeded": "El proxy del sistema cambió después de iniciar el entorno, que sigue usando la ruta anterior. Aplicar reinicia el entorno; las tareas en curso se detendrán.",
+    "proxyApply": "Aplicar",
     "proxyNoneDetected": "No se detectó proxy del sistema: las conexiones van directas.",
     "mirrorTitle": "Réplicas de paquetes",
     "mirrorPypi": "Índice PyPI",
@@ -99,7 +111,7 @@
   },
   "model": {
     "title": "Modelo",
-    "hint": "Los proveedores de abajo aportan los modelos que puedes elegir aquí",
+    "hint": "El modelo con el que empieza cada conversación nueva. Los proveedores de abajo determinan las opciones.",
     "connectPrompt": "Conecta el entorno de ejecución para configurar modelos.",
     "notSet": "Sin configurar — elige un modelo predeterminado",
     "providersDivider": "Proveedores",
@@ -117,13 +129,14 @@
     "catalogUnavailable": "El catálogo de modelos no está disponible en este momento.",
     "catalogLoading": "Cargando el catálogo de modelos…",
     "noModels": "No hay modelos disponibles.",
-    "manageProviders": "Administrar proveedores",
     "emptyFavorites": "Los modelos favoritos aparecen aquí.",
     "emptyRecent": "Los modelos seleccionados correctamente aparecen aquí.",
     "noResults": "Ningún modelo coincide con «{{query}}».",
     "clearSearch": "Borrar búsqueda",
     "addFavorite": "Añadir {{model}} a favoritos",
-    "removeFavorite": "Quitar {{model}} de favoritos"
+    "removeFavorite": "Quitar {{model}} de favoritos",
+    "change": "Cambiar",
+    "noProvidersHint": "Conecta un proveedor más abajo."
   },
   "providers": {
     "title": "Proveedores",
@@ -149,29 +162,39 @@
     "pasteCode": "Pega el código del navegador",
     "customEndpoint": "Endpoint personalizado",
     "customEndpointHint": "autoalojado · Ollama local · compatible con OpenAI/Anthropic",
-    "customNamePlaceholder": "Nombre — p. ej., Ollama, Mi gateway DeepSeek",
+    "customNamePlaceholder": "p. ej. Ollama, mi pasarela DeepSeek",
     "openaiCompatible": "Compatible con OpenAI",
     "anthropicCompatible": "Compatible con Anthropic",
-    "customUrlPlaceholder": "URL base — Ollama: http://127.0.0.1:11434/v1",
-    "customKeyPlaceholder": "Clave de API — opcional, Ollama no necesita ninguna",
-    "customModelsPlaceholder": "ID de modelos, separados por comas",
-    "customContextPlaceholder": "Ventana de contexto — opcional, 128k por defecto",
+    "customUrlPlaceholder": "http://127.0.0.1:11434/v1",
+    "customKeyPlaceholder": "Opcional: Ollama no necesita",
+    "customModelsPlaceholder": "ids de modelo separados por comas",
+    "customContextPlaceholder": "Opcional: 128k por defecto",
     "fetchModels": "Obtener modelos",
     "fetchingModels": "Obteniendo…",
     "noModelsFound": "El endpoint no informó ningún modelo.",
     "addEndpoint": "Añadir endpoint",
-    "importLogin": "¿Ya usas la CLI de OpenCode? Importa su inicio de sesión"
+    "importLogin": "¿Ya usas la CLI de OpenCode? Importa su inicio de sesión",
+    "addTitle": "Añadir un proveedor",
+    "fieldName": "Nombre",
+    "fieldApiStyle": "Estilo de API",
+    "fieldBaseUrl": "URL base",
+    "fieldApiKey": "Clave de API",
+    "fieldModels": "Modelos",
+    "fieldContext": "Ventana de contexto"
   },
   "mcp": {
     "title": "Servidores MCP",
     "hint": "Herramientas adicionales para el agente (Model Context Protocol) — p. ej., un MCP de Jupyter o del navegador",
     "connectPrompt": "Conecta el entorno de ejecución para configurar servidores MCP.",
     "openSource": "código abierto",
+    "official": "oficial",
     "enterKeyFirstTitle": "Introduce primero la clave de API",
     "settingUp": "Configurando…",
     "enable": "Habilitar",
     "freeKeySuffix": "(clave gratuita)",
+    "requiredSuffix": "(obligatorio)",
     "getFreeKey": "Obtener una clave gratuita",
+    "learnMore": "Más información",
     "jupyterLabel": "Jupyter",
     "jupyterDescription": "permite que el agente controle cuadernos reales · entorno aislado con numpy·pandas·matplotlib, ~500 MB en la primera ejecución · una vez configurado, el botón Ejecutar de la app también lo usa, así que tú y el agente comparten un mismo Python",
     "setUpAndEnable": "Configurar y habilitar",
@@ -225,6 +248,26 @@
     "hint": "Un agente revisor de solo lectura que audita el trabajo terminado: trazabilidad, estadística, unidades y procedencia.",
     "autoTitle": "Revisar tras cada turno que cambie archivos",
     "autoHint": "Ejecuta un turno de modelo adicional en segundo plano por cambio. La conversación sigue disponible; se omiten los turnos de solo lectura."
+  },
+  "sync": {
+    "title": "Sincronización de conversaciones",
+    "hint": "Ten tus conversaciones en varias de tus propias máquinas. Apunta esto a una carpeta que sincronice tu servicio en la nube; cada conversación se refleja allí como un archivo propio. Desactivado hasta que elijas una carpeta.",
+    "hintOn": "Activado. Cada conversación se refleja en la carpeta de abajo como un archivo propio; otras máquinas que apunten a la misma carpeta las recogen. Los secretos nunca se sincronizan.",
+    "folderTitle": "Carpeta de sincronización",
+    "folderNone": "Sin definir: las conversaciones se quedan en esta máquina.",
+    "choose": "Elegir carpeta",
+    "change": "Cambiar",
+    "stop": "Desactivar",
+    "nowTitle": "Sincronizar ahora",
+    "nowHint": "Se ejecuta solo tras cada turno; esto es para cuando lo quieras de inmediato.",
+    "now": "Sincronizar",
+    "running": "Sincronizando…",
+    "done": "Sincronizado. {{imported}} recibidas, {{exported}} enviadas.",
+    "folderSet": "Carpeta de sincronización definida.",
+    "stopped": "Sincronización desactivada.",
+    "unusable": "Esa carpeta no se puede usar",
+    "last": "Última sincronización {{when}}: {{imported}} recibidas, {{exported}} enviadas.",
+    "lastFailed": "La última sincronización falló: {{error}}"
   },
   "python": {
     "title": "Kernel local de Python",
@@ -379,7 +422,12 @@
     "connectPrompt": "Introduce el token de acceso de la app de escritorio → Ajustes → Acceso remoto.",
     "acpTitle": "Editores externos (ACP)",
     "acpHint": "Controla este espacio de trabajo desde Zed, JetBrains, Neovim o cualquier editor que hable el Agent Client Protocol. Pega esta entrada de agente en la configuración del editor; se conecta por la pasarela de arriba, con el acceso que permita el token.",
-    "acpNodeHint": "El editor lanza este script con Node 18+. El token se pasa por el entorno, no en la línea de comandos."
+    "acpNodeHint": "El editor lanza este script con Node 18+. El token se pasa por el entorno, no en la línea de comandos.",
+    "port": "Puerto de la pasarela",
+    "portHint": "El puerto en el que escucha la pasarela. Por defecto es 4098; configure un puerto personalizado para reglas de firewall o configuraciones multi-instancia.",
+    "portInvalid": "Introduzca un número de puerto válido (1-65535).",
+    "portApply": "Aplicar",
+    "portReset": "Restablecer predeterminado"
   },
   "cli": {
     "title": "Comando de terminal (osd)",
@@ -416,13 +464,22 @@
     "title": "Modelo y esfuerzo por agente",
     "hint": "Ejecuta un revisor o explorador en un modelo rápido mientras el agente principal razona en uno potente, y fija cuánto piensa cada uno.",
     "noModels": "Conecta un proveedor para elegir modelos.",
-    "followDefault": "Modelo predeterminado",
-    "followDefaultNamed": "Predeterminado ({{model}})",
+    "followDefault": "Seguir el predeterminado",
     "modelFor": "Modelo para {{agent}}",
     "defaultEffort": "Esfuerzo predeterminado",
     "effortFor": "Esfuerzo de razonamiento para {{agent}}",
     "retiredOption": "{{model}} — ya no se sirve",
-    "primaryHint": "build y plan ejecutan los mensajes que envías. El modelo definido aquí se aplica salvo que elijas uno dentro de una conversación, que prevalece solo en esa conversación."
+    "primaryHint": "build y plan ejecutan los mensajes que envías. El modelo definido aquí se aplica salvo que elijas uno dentro de una conversación, que prevalece solo en esa conversación.",
+    "group": {
+      "conversation": "Agentes con los que hablas",
+      "utility": "Usados por el banco de trabajo"
+    },
+    "utilityHint": "Trabajo mecánico y breve que el runtime hace por su cuenta: aquí un modelo rápido es pura ganancia.",
+    "about": {
+      "title": "Nombra una sesión a partir de su primer mensaje.",
+      "summary": "Escribe el resumen breve de una conversación.",
+      "compaction": "Reescribe una conversación larga para que quepa en la ventana de contexto."
+    }
   },
   "ssh": {
     "title": "Iniciar sesión en {{host}}",
@@ -434,5 +491,55 @@
     "reveal": "Mostrar lo escrito",
     "hide": "Ocultar lo escrito",
     "privacy": "Solo se envía al ssh de este equipo. Nunca se guarda, ni se registra, ni entra en la procedencia."
+  },
+  "notify": {
+    "title": "Notificaciones",
+    "hint": "Notificaciones nativas del sistema para cosas que terminan mientras no estás mirando.",
+    "turnCompleteTitle": "Notificar cuando termine un turno",
+    "turnCompleteHint": "Envía una notificación del sistema cuando un turno termina — completado, fallido o interrumpido — para que no tengas que vigilar el punto de estado."
+  },
+  "stall": {
+    "channelA": "Comprobación de silencio",
+    "channelB": "Comprobación de repetición",
+    "custom": "Personalizado…",
+    "enableHint": "Solo avisa — tú decides. Una tarea larga legítima (una sesión de entrenamiento, una consulta periódica) nunca se interrumpe.",
+    "enableTitle": "Vigilar turnos bloqueados",
+    "hint": "Detecta un turno que parece bloqueado — demasiado tiempo en silencio, o repitiendo la misma llamada una y otra vez — y ofrece \"Seguir esperando / Detener turno\". Nunca se interrumpe nada automáticamente.",
+    "hoursUnit": "h",
+    "repeatCustomHint": "Veces (2–100)",
+    "repeatLabel": "Avisar cuando la misma llamada se repita",
+    "repeatUnit": "veces",
+    "silenceCustomHint": "Minutos (1–1440)",
+    "silenceHint": "Para cuando quieras que te avise si el agente se queda en silencio. Si sueles ejecutar tareas que permanecen en silencio más de una hora, súbelo o deja esta comprobación desactivada.",
+    "silenceLabel": "Avisar tras silencio de",
+    "silenceUnit": "min",
+    "title": "Guardia anti-bloqueo",
+    "webNote": "En el navegador, el aviso aparece solo en la conversación — sin notificación del sistema."
+  },
+  "computer": {
+    "title": "Uso del equipo",
+    "hint": "Permite que el agente lea y controle aplicaciones de este equipo a través de la API de accesibilidad del sistema. Actúa sobre elementos de la interfaz con nombre en lugar de adivinar píxeles, e informa de si cada acción pudo verificarse realmente. Se te pedirá aprobación la primera vez en cada conversación.",
+    "checking": "Comprobando…",
+    "state": "Disponibilidad",
+    "ready": "Listo. El agente puede usar aplicaciones de este equipo cuando se lo pidas.",
+    "unavailable": "No disponible en esta máquina.",
+    "setup": "Abrir configuración",
+    "recheck": "Volver a comprobar",
+    "grant": "Conceder…",
+    "granted": "Concedido",
+    "opened": "Se abrió la ventana de permisos.",
+    "error": "Uso del equipo",
+    "accessibility": "Accesibilidad",
+    "accessibilityHint": "Obligatorio. Permite al asistente leer la interfaz de una aplicación y actuar sobre ella. Se concede a Open Science Computer Use — un asistente independiente — y no a todo el banco de trabajo.",
+    "screenshots": "Grabación de pantalla",
+    "screenshotsHint": "Opcional, y se concede a Open Science en sí, no al asistente — macOS atribuye la captura de pantalla a la aplicación que inició la petición. Solo hace falta cuando el agente tiene que mirar una ventana que no puede leer como texto, como un gráfico o un lienzo."
+  },
+  "userBrowser": {
+    "title": "Un navegador que instalaste tú",
+    "hint": "Open Science encontró en este Mac un navegador que su agente puede manejar desde la shell. No hay nada que configurar: está aquí para que sepas que puede alcanzarlo.",
+    "name": "ego lite",
+    "reachable": "Instalado y accesible. El agente pedirá permiso antes del primer uso en cada conversación.",
+    "notReachable": "Instalado, pero su herramienta de línea de comandos no está en esta máquina, así que el agente no puede alcanzarlo. Ejecuta la configuración propia de ego lite para añadirla.",
+    "tradeoff": "No es el conector de navegador de arriba. Aquel maneja un navegador aparte que esta aplicación controla, con un perfil aislado. Este es tu navegador de cada día y lleva tus sesiones realmente iniciadas — que es lo que lo hace útil, y por lo que pregunta primero. Solo macOS."
   }
 }

@@ -3,7 +3,7 @@ import type { MessageUsage, RuntimeStatus, ToolCallStatus } from "@ai4s/shared";
 export type { RuntimeStatus, ToolCallStatus };
 
 /** Pinned OpenCode release this client targets. */
-export const OPENCODE_VERSION = "1.18.27";
+export const OPENCODE_VERSION = "1.18.32";
 
 /** OpenCode server defaults (`opencode serve`). */
 export const DEFAULT_OPENCODE_URL = "http://127.0.0.1:4096";
@@ -231,6 +231,9 @@ export interface SessionMeta {
   /** Epoch ms the user archived this conversation; absent when active.
    *  Archived conversations are kept and searchable — just out of the way. */
   archived?: number;
+  /** The model this session is bound to (from the list endpoint's `model`),
+   *  e.g. for context-limit controls. */
+  model?: { id?: string; providerID?: string };
   /** The runtime's whole metadata object, so a write can merge instead of
    *  clobbering keys another client owns. */
   metadata?: Record<string, unknown>;
@@ -465,6 +468,16 @@ export interface McpServer {
   /** e.g. "connected" | "failed" | "disabled" | "pending" */
   status: string;
   config?: McpConfig;
+}
+
+/** Result of starting an OAuth flow for a remote MCP server (`POST /mcp/{name}/auth`).
+ *  Open `authorizationUrl` in the user's browser; `listMcpServers` reports
+ *  "connected" once the callback lands — see `mcp.auth.authenticate` in the
+ *  OpenCode API, which this deliberately avoids (its single request stays open
+ *  until login completes, longer than a webview's own fetch idle timeout). */
+export interface McpOAuthStart {
+  authorizationUrl: string;
+  oauthState: string;
 }
 
 // ---- Raw OpenCode wire shapes (subset we consume) ----

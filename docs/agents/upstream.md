@@ -6,7 +6,7 @@
 
 - `origin`: `https://github.com/Kitkitkittt/SciRsc.git`
 - `upstream`: `https://github.com/ai4s-research/open-science.git`
-- baseline: Open Science Desktop `v0.5.1`, commit `ff7cb05f6a96b8fbcd169f2607cf1bba9bb8aa26`
+- baseline: Open Science Desktop `v0.6.0`, commit `f879a9b3b0bf93794c23370363002979e6fa89e3`
 
 SciRsc-specific decisions and source audits live in `docs/research/2026-09-03-academic-ai-data-dashboard.md`.
 

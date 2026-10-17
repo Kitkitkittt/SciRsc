@@ -1,4 +1,15 @@
-# AI4S Workbench Desktop — Product Requirements
+# Open Science Desktop (SciRsc) — Product Requirements
+
+> **Current baseline: Open Science Desktop v0.6.0.** SciRsc is an independent academic
+> AI/data research dashboard retaining local scientific instructions and manual approval
+> defaults. The current app includes project-scoped Screens, split panes, integrated
+> terminals, notebooks, remote compute, skills/MCP connectors, and artifact/review flows;
+> a shared Rust core also powers the headless `osd` server and authenticated web gateway.
+> OpenCode **1.18.32** is bundled in an app-private profile. See `README.md` and
+> `PROGRESS.md` for current capabilities and implementation details.
+>
+> The original v0.1 status and phased requirements below are retained as historical and
+> target product design, not a statement that all requirements are implemented.
 
 > **Status (v0.1, 2026-07-02).** The runtime is **OpenCode**, bundled as an isolated
 > sidecar (one-click, auto-started, does not touch a user's own OpenCode). Built: the
@@ -8,9 +19,9 @@
 
 ## 1. Positioning
 
-**AI4S Workbench Desktop** is an open-source AI research workbench with macOS /
-Windows installers, positioned as an **open-source alternative to Claude Science
-style products**.
+**SciRsc**, based on **Open Science Desktop**, is an open-source AI research workbench
+for macOS, Windows, and Linux, positioned as an **open-source alternative to Claude
+Science style products**.
 
 It is not an ordinary paper-summarization tool. It is a local-first, model-agnostic,
 reproducible, auditable research agent workbench that helps researchers do:
@@ -52,7 +63,7 @@ offered as equals — installing one over the other registers the app twice.
 
 ### 2.2 Differentiation
 
-Versus ordinary AI paper tools, AI4S Workbench is different because it is:
+Versus ordinary AI paper tools, the workbench is different because it is:
 
 1. A research workbench, not a chat box.
 2. A generator of traceable artifacts, not just text.

@@ -1,4 +1,17 @@
-# AI4S Workbench Desktop — Technical Design
+# Open Science Desktop (SciRsc) — Technical Design
+
+> **Current baseline: Open Science Desktop v0.6.0.** SciRsc retains its local scientific
+> instructions and approval defaults on top of the tagged upstream release. The desktop
+> uses Tauri 2, React, and the shared `crates/osd-core` service layer; the same core powers
+> the headless `osd` server and authenticated gateway. OpenCode **1.18.32** is bundled in
+> an app-private profile. Current features include project-scoped Screens and split panes,
+> integrated terminals, notebooks, remote compute, skills/MCP connectors, artifact viewers,
+> provenance, and review workflows. See `README.md` and `PROGRESS.md` for current scope.
+>
+> **Reading this document:** the original v0.1 status below, v0.1 task breakdown, and
+> forward-looking examples are retained as historical/target design, not a current feature
+> inventory. Proposed schemas, storage layouts, security goals, and performance targets
+> are not guarantees of implementation.
 
 > **Implementation status (v0.1, 2026-07-02).** Built and verified: Tauri 2 shell + React
 > UI; **OpenCode** bundled as an isolated sidecar (auto-started, app-private config/data,
@@ -18,11 +31,11 @@ extensibility to Jupyter, HPC, Modal, Docker, and remote servers.
 ## 2. Overall architecture
 
 ```text
-AI4S Workbench Desktop
+Open Science Desktop / SciRsc
 ├── Desktop Shell: Tauri 2
 ├── Frontend: React + TypeScript + Vite
 ├── UI System: Tailwind CSS + Radix UI / shadcn-style components
-├── Local Service: Rust commands + bundled OpenCode sidecar
+├── Local Service: shared Rust core + Tauri desktop commands / headless osd server
 ├── Agent Runtime: OpenCode (bundled single-binary sidecar)
 ├── Agent Protocol: OpenCode HTTP + SSE API (opencode serve)
 ├── Skills Layer: OpenCode skills/agents + optional third-party scientific skills
@@ -48,8 +61,8 @@ small, fast, secure cross-platform apps built from a single codebase.
 
 If later needs arise — complex browser capabilities, a more mature desktop ecosystem,
 identical embedded Chromium behavior, or many native Node.js modules — Electron could be
-reconsidered. But AI4S Workbench's core is the workbench, files, agent, runtime, and
-artifacts, which do not need Chromium-level capabilities, so Tauri fits better.
+reconsidered. But the core workbench, files, agent, runtime, and artifact workflows do
+not need Chromium-level capabilities, so Tauri fits better.
 
 ## 4. Frontend
 
@@ -82,7 +95,7 @@ capabilities only, not heavy computation.
 ### 5.1 Choice: OpenCode (bundled)
 
 The agent runtime is **OpenCode** (`anomalyco/opencode`, MIT), pinned to a stable
-release (`OPENCODE_VERSION`, currently 1.18.27). It is distributed as a **single
+release (`OPENCODE_VERSION`, currently 1.18.32). It is distributed as a **single
 binary**, which makes it ideal to bundle as a desktop sidecar — no Python/Node runtime
 to package. It supports MCP, skills, and agents, is model-agnostic (BYOK), and serves as
 an open-source coding/agent runtime in the spirit of Claude Code.
@@ -121,22 +134,24 @@ Frontend renders streaming messages, tool cards, and per-session history
 
 OpenCode is bundled as a Tauri **sidecar** (`externalBin`, one binary per target triple,
 git-ignored and fetched by `scripts/dev/fetch-opencode.sh`). The Rust side
-(`src-tauri/src/runtime.rs`) starts it so it never collides with a user's own OpenCode:
+(`crates/osd-core/src/runtime.rs`) starts it so it never collides with a user's own OpenCode:
 
 - runs the **bundled** binary (not the user's `PATH`);
-- on a **dedicated free port** (not the default 4096);
+- on a **dedicated free loopback port**, with a per-run server password (not the default 4096);
 - with an **app-private** config/data dir via `XDG_CONFIG_HOME`/`XDG_DATA_HOME` under
   `~/Library/Application Support/com.ai4s.workbench/runtime/` (macOS) — so the user's
   sessions/config are never touched;
-- but it **shares the user's login**: the user's `auth.json` (OpenCode credentials / free
-  access) is copied read-only into the sandbox at startup, so the bundled runtime can
-  reply out of the box without a separate login. We only read the user's auth file; we
-  never modify it or their sessions.
+- credentials stay in the app-private profile. Importing a user's existing OpenCode
+  `auth.json` is an **explicit Settings action**, not an automatic startup copy. Import
+  reads the source without modifying the user's auth file or sessions;
 - killed on app exit.
 
-The user's model provider key (entered in Settings) is written into that app-private
-`opencode.json` by the `configure_opencode` Rust command, and the sidecar is restarted
-to pick it up. Keys never enter the user's global OpenCode config, logs, or git.
+Provider configuration and credentials entered through Settings stay in the app-private
+OpenCode config/auth stores (`opencode.json` or `opencode.jsonc`, and `auth.json`), not
+the workspace or global OpenCode configuration. These are local files protected by
+private directory permissions, not a claim of operating-system keychain storage.
+The sidecar restarts when a configuration change requires it. The gateway is a separate
+bearer-token boundary; only that listener can be opted into LAN access.
 
 ## 6. Skills & MCP
 
@@ -217,6 +232,12 @@ lightweight installer + a first-launch Runtime Manager + on-demand scientific en
 Detect OpenCode; detect Python / uv / Node / Git; create the workspace; create isolated
 environments; install base Python packages; manage scientific tool dependencies; start
 the OpenCode server; start an optional Jupyter Gateway; monitor runtime health.
+
+The directory sketch below is a target design, not the current application data path.
+Current runtime state is under the platform data directory for the unchanged identifier
+`com.ai4s.workbench`, in `runtime/{xdg-config,xdg-data,xdg-cache,xdg-state}`. Headless
+instances may select a separate root with `osd server --state-dir DIR`; that does not
+change desktop state or import credentials into a fresh instance.
 
 ### 8.3 Runtime directory
 
@@ -322,17 +343,17 @@ maps high-risk actions to "ask" and must never blanket-allow them.
 
 ### 11.3 API keys
 
-Stored in macOS Keychain / Windows Credential Manager (fallback: encrypted local
-secrets). Never enter provenance, logs, crash reports, git, or exported projects.
+Current implementation: app-private OpenCode config/auth files protected by per-user
+directory permissions. Never place keys in provenance, logs, crash reports, git, or
+exported projects. OS keychain storage remains a target, not the current mechanism.
 
 ## 12. Packaging & release
 
 ### 12.1 macOS
 
-Outputs: `AI4S-Workbench-aarch64.dmg`, `AI4S-Workbench-x64.dmg`,
-`AI4S-Workbench-universal.dmg` (later). Code signing / notarization needs an Apple
-Developer account; a free account cannot notarize, so users may still see an
-"unverified" prompt.
+Current upstream macOS releases provide Apple Silicon and Intel `.dmg` / `.app`
+packages, Developer ID signed, notarized, and stapled. Local unsigned builds do not
+inherit that release signing. The internal app identifier remains `com.ai4s.workbench`.
 
 ### 12.2 Windows
 
@@ -434,24 +455,27 @@ the cause, a fallback suggestion, a retry button, and an edit-plan button.
 
 ## 16. Repository structure
 
-Monorepo:
+Current monorepo layout (internal package and executable identifiers are retained):
 
 ```text
-ai4s-workbench/
+SciRsc/
   apps/desktop/{src,src-tauri}/
+  crates/{osd-core,osd-cli}/
   packages/{ui,shared,sdk}/
-  runtime/{manager,opencode-profile,mcp,skills}/
+  runtime/{manager,opencode-profile,mcp,skills,harness}/
   docs/{PRD.md,TECHNICAL_DESIGN.md}
-  examples/bci-trends/
-  scripts/{release,dev}/     # dev/fetch-opencode.sh fetches the pinned sidecar
+  examples/
+  scripts/{release,dev}/
+  launch.sh
 ```
 
-- `apps/desktop` — Tauri + React desktop app; `src-tauri/src/runtime.rs` supervises the
-  bundled OpenCode sidecar (`OpenCodeClient` lives in `packages/sdk`).
-- `runtime/manager` — local runtime manager (detect deps, workspace, provenance, logs).
-- `runtime/opencode-profile` — the AI4S Workbench OpenCode config/skills bundle.
-- `runtime/skills` — self-authored scientific skills.
-- `examples` — the complete demo project.
+- `apps/desktop` — Tauri + React UI and native desktop capabilities.
+- `crates/osd-core` — workspace, bundled sidecar supervision, and authenticated gateway.
+- `crates/osd-cli` — headless server and `osd` terminal client.
+- `packages/sdk` — `OpenCodeClient`, the frontend's runtime API boundary.
+- `runtime/opencode-profile` — bundled OpenCode agent/command configuration.
+- `runtime/skills` — first-party and build-fetched scientific/document/browser skills.
+- `launch.sh` — runs the existing local release binary; it does not build the app.
 
 ## 17. v0.1 task breakdown
 

@@ -141,19 +141,19 @@ export const UserMessage = memo(function UserMessage({
   }
 
   return (
-    <div {...{ [HOVER_HOST]: "" }} className="flex flex-col items-end">
+    <div {...{ [HOVER_HOST]: "" }} className="relative flex flex-col items-end">
       <div className="w-fit max-w-[85%] whitespace-pre-wrap break-words rounded-card bg-surface-2 px-4 py-2.5 text-[15px] leading-relaxed text-text">
         {block.text}
       </div>
       <div
         data-hover-row
-        className="flex items-center gap-0.5 pr-0.5 pt-1"
+        className="flex items-center justify-end gap-0.5 pr-0.5 pt-0.5"
       >
         <button
           onClick={copy}
           title={copied ? t("message.copied") : t("message.copy")}
           aria-label={t("message.copy")}
-          className="rounded p-1 text-muted hover:bg-surface-2 hover:text-text"
+          className="rounded p-0.5 text-muted hover:bg-surface-2 hover:text-text"
         >
           {copied ? <Check size={14} /> : <Copy size={14} />}
         </button>
@@ -162,7 +162,7 @@ export const UserMessage = memo(function UserMessage({
             onClick={openEditor}
             title={t("message.edit")}
             aria-label={t("message.edit")}
-            className="rounded p-1 text-muted hover:bg-surface-2 hover:text-text"
+            className="rounded p-0.5 text-muted hover:bg-surface-2 hover:text-text"
           >
             <Pencil size={14} />
           </button>
@@ -172,7 +172,7 @@ export const UserMessage = memo(function UserMessage({
             onClick={() => setConfirm("revert")}
             title={t("message.revert")}
             aria-label={t("message.revert")}
-            className="rounded p-1 text-muted hover:bg-surface-2 hover:text-text"
+            className="rounded p-0.5 text-muted hover:bg-surface-2 hover:text-text"
           >
             <RotateCcw size={14} />
           </button>
@@ -244,8 +244,8 @@ export const AgentMessage = memo(function AgentMessage({
   return (
     // Marked so a text selection inside an ANSWER (never a tool log or the
     // user's own message) can offer follow-up actions — see SelectionActions.
-    <div {...{ [HOVER_HOST]: "" }} data-agent-message>
-      <MarkdownViewer>{shown}</MarkdownViewer>
+    <div {...{ [HOVER_HOST]: "" }} data-agent-message className="relative">
+      <MarkdownViewer links>{shown}</MarkdownViewer>
       {refs.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-2">
           {refs.map((path) => (
@@ -263,13 +263,13 @@ export const AgentMessage = memo(function AgentMessage({
       )}
       <div
         data-hover-row
-        className="flex min-w-0 items-center gap-1.5 pt-1"
+        className="flex min-w-0 items-center gap-1.5 pt-0.5"
       >
         <button
           onClick={copy}
           title={copied ? t("message.copied") : t("message.copy")}
           aria-label={t("message.copy")}
-          className="shrink-0 rounded p-1 text-muted hover:bg-surface-2 hover:text-text"
+          className="shrink-0 rounded p-0.5 text-muted hover:bg-surface-2 hover:text-text"
         >
           {copied ? <Check size={14} /> : <Copy size={14} />}
         </button>
@@ -292,16 +292,16 @@ export const DataTable = memo(function DataTable({ block }: { block: DataTableBl
     // latched trackpad gestures back as well (lib/wheelChain).
     <div
       {...{ [HSCROLL_ATTR]: "" }}
-      className="overflow-x-auto overflow-y-hidden rounded-card border border-border bg-surface shadow-card"
+      className="overflow-x-auto overflow-y-hidden"
     >
       {block.caption && (
-        <div className="border-b border-border px-4 py-2 text-xs text-muted">{block.caption}</div>
+        <div className="pb-2 text-xs text-muted">{block.caption}</div>
       )}
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr className="border-b border-border text-left text-muted">
             {block.columns.map((c) => (
-              <th key={c} className="px-4 py-2 font-medium">
+              <th key={c} className="py-2 pr-4 font-medium">
                 {c}
               </th>
             ))}
@@ -314,7 +314,7 @@ export const DataTable = memo(function DataTable({ block }: { block: DataTableBl
                 <td
                   key={j}
                   className={cn(
-                    "px-4 py-2 text-text",
+                    "py-2 pr-4 text-text",
                     j === row.length - 1 && "font-mono text-[13px] text-link",
                   )}
                 >
@@ -335,8 +335,8 @@ export const RunningJobsOverlay = memo(function RunningJobsOverlay({
   block: RunningJobsBlock;
 }) {
   return (
-    <div className="rounded-card border border-border bg-surface shadow-card">
-      <div className="border-b border-border px-4 py-2 text-xs font-medium uppercase tracking-wider text-muted">
+    <div>
+      <div className="border-b border-border pb-2 text-xs font-medium uppercase tracking-wider text-muted">
         {block.title}
       </div>
       <ul className="divide-y divide-border/60">
@@ -359,7 +359,19 @@ const TONE: Record<NonNullable<StatusLineBlock["tone"]>, string> = {
   error: "text-error",
 };
 
-export const StatusLine = memo(function StatusLine({ block }: { block: StatusLineBlock }) {
+export const StatusLine = memo(function StatusLine({
+  block,
+  onStallAction,
+  onRetry,
+}: {
+  block: StatusLineBlock;
+  /** Present only in the live session; powers the stall warning's two actions. */
+  onStallAction?: (stallKey: string, action: "keep-waiting" | "stop") => void;
+  /** Present only in the live session; powers the failed history-load error
+   *  line's Retry action (#139). */
+  onRetry?: () => void;
+}) {
+  const { t } = useTranslation(["session", "common"]);
   return (
     <div className={cn(block.divider && "border-t border-border pt-4")}>
       <div className={cn("flex items-center gap-2 text-sm", TONE[block.tone ?? "review"])}>
@@ -367,7 +379,36 @@ export const StatusLine = memo(function StatusLine({ block }: { block: StatusLin
           size={14}
           className={cn(block.tone === "running" && "animate-spin", block.tone !== "running" && "hidden")}
         />
-        <span>{block.text}</span>
+        <span className="min-w-0 flex-1">{block.text}</span>
+        {block.stall && onStallAction && (
+          <span className="flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              className="rounded-input border border-border px-2.5 py-1 text-xs font-medium text-text hover:bg-surface-2"
+              onClick={() => onStallAction(block.stall!.key, "keep-waiting")}
+            >
+              {t("stall.keepWaiting")}
+            </button>
+            <button
+              type="button"
+              className="rounded-input bg-error px-2.5 py-1 text-xs font-medium text-white hover:opacity-90"
+              onClick={() => onStallAction(block.stall!.key, "stop")}
+            >
+              {t("stall.stopTurn")}
+            </button>
+          </span>
+        )}
+        {block.retry && onRetry && (
+          <span className="flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              className="rounded-input border border-border px-2.5 py-1 text-xs font-medium text-text hover:bg-surface-2"
+              onClick={onRetry}
+            >
+              {t("historyRetry")}
+            </button>
+          </span>
+        )}
       </div>
     </div>
   );
@@ -394,7 +435,7 @@ export const HistoryRepair = memo(function HistoryRepair({
   const canRepair = !!onRevert && !!target;
 
   return (
-    <div className="rounded-card border border-border bg-surface-2/50 p-3 text-sm">
+    <div className="rounded-card bg-surface-2 p-3 text-sm">
       <div className="flex items-start gap-2">
         <Wrench size={14} className="mt-0.5 shrink-0 text-muted" aria-hidden />
         <div className="min-w-0 flex-1">

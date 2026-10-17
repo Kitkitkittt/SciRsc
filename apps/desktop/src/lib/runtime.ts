@@ -66,7 +66,7 @@ import { samePath } from "./workspacePath";
 import { kernelReset } from "./kernel";
 import { moveScrollMemory } from "./scrollMemory";
 import { deriveArtifact, deriveArtifactPresentation } from "./artifacts";
-import { useLayoutStore } from "./layout";
+import { DEFAULT_PROJECT, useLayoutStore } from "./layout";
 import { provenanceInputsFromEvent, recordProvenance } from "./provenance";
 import { clearResolvedPaths } from "./artifactFile";
 import { imageAttachmentParts } from "./promptAttachments";
@@ -83,7 +83,21 @@ import {
 } from "./autoReview";
 import { isGoalInjectedPrompt } from "./goalPrompts";
 import { findHistoryDefects, repairTarget } from "./malformedHistory";
-import { notifyPermissionRequest } from "./systemNotification";
+import { runSync, syncDir } from "./syncRunner";
+import { notifyPermissionRequest, notifyTurnComplete } from "./systemNotification";
+import {
+  DEFAULT_STALL_GUARD_CONFIG,
+  applyStallEvent,
+  createStallSessionState,
+  markStallTurnIdle,
+  markStallTurnRunning,
+  resetStallAfterKeepWaiting,
+  stallVerdict,
+  verdictKey,
+  type StallGuardConfig,
+  type StallSessionState,
+  type StallVerdict,
+} from "./stallGuard";
 import { fallbackDefaultModel } from "@/components/settings/modelCatalog";
 import { listProvidersWithAvailability, ZEN_PROVIDER_ID } from "./zenModels";
 import { toast } from "@/lib/toast";
@@ -135,15 +149,83 @@ function initialReasoningVariant(): string | null {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem(REASONING_KEY) || null;
 }
+/** Settings key for the optional turn-completion system notification. Off by
+ *  default: a notification on every finished turn would nag, so it is the
+ *  user's call. Persisted in localStorage like its sibling AUTO_REVIEW_KEY. */
+const TURN_NOTIFY_KEY = "ai4s.turnNotify.v1";
+
+/** Settings key for the stall guard (#121): a safety net that NOTICES a turn
+ *  that looks stuck (silent for N minutes, or running the same tool call K
+ *  times with identical results) and offers Keep waiting / Stop — nothing is
+ *  ever auto-interrupted. Off by default. Persisted as one JSON record so the
+ *  master switch, silence minutes (Channel A) and repeat threshold (Channel B,
+ *  K) travel together. */
+const STALL_GUARD_KEY = "ai4s.stallGuard.v1";
+
 function initialAutoReview(): boolean {
   if (typeof window === "undefined") return false;
   return window.localStorage.getItem(AUTO_REVIEW_KEY) === "1";
+}
+
+function initialTurnNotify(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(TURN_NOTIFY_KEY) === "1";
+}
+
+/** The user's stall-guard configuration, or the defaults when unset or
+ *  malformed. Bounds are enforced here so a hand-edited value (or a hostile
+ *  localStorage write) cannot break the feature: a silence threshold of 0 or
+ *  negative would warn instantly, a nonsense huge one would never warn, and a
+ *  repeat threshold below the meaning of "repeat" would nag on a single call.
+ *  The channel switches default to OFF (A) / ON (B) — see
+ *  DEFAULT_STALL_GUARD_CONFIG for why. */
+function initialStallGuardConfig(): StallGuardConfig {
+  if (typeof window === "undefined") return { ...DEFAULT_STALL_GUARD_CONFIG };
+  const raw = window.localStorage.getItem(STALL_GUARD_KEY);
+  if (!raw) return { ...DEFAULT_STALL_GUARD_CONFIG };
+  try {
+    const parsed = JSON.parse(raw) as Partial<StallGuardConfig>;
+    return {
+      enabled: parsed.enabled === true,
+      channelAEnabled: parsed.channelAEnabled === true,
+      channelBEnabled: parsed.channelBEnabled !== false,
+      silenceMinutes:
+        typeof parsed.silenceMinutes === "number" &&
+        Number.isFinite(parsed.silenceMinutes) &&
+        parsed.silenceMinutes >= 1 &&
+        parsed.silenceMinutes <= 1440
+          ? Math.round(parsed.silenceMinutes)
+          : DEFAULT_STALL_GUARD_CONFIG.silenceMinutes,
+      repeatThreshold:
+        typeof parsed.repeatThreshold === "number" &&
+        Number.isFinite(parsed.repeatThreshold) &&
+        parsed.repeatThreshold >= 2 &&
+        parsed.repeatThreshold <= 100
+          ? Math.round(parsed.repeatThreshold)
+          : DEFAULT_STALL_GUARD_CONFIG.repeatThreshold,
+    };
+  } catch {
+    return { ...DEFAULT_STALL_GUARD_CONFIG };
+  }
+}
+
+function persistStallGuardConfig(config: StallGuardConfig): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(STALL_GUARD_KEY, JSON.stringify(config));
 }
 
 export interface Thread {
   blocks: ThreadBlock[];
   index: Record<string, number>;
   loaded: boolean;
+  /** Set when loading this session's history failed (openSession's catch).
+   *  `loaded` alone cannot carry that: a failure must still stop the loading
+   *  skeleton (the thread renders an error line instead), but it must NOT
+   *  satisfy the "already loaded" gate — before this flag every later open hit
+   *  that gate's early return and the session showed "Failed to load messages"
+   *  for the rest of the app run (#139). A successful reload replaces the
+   *  thread, which drops the flag. */
+  historyError?: string;
 }
 
 /** Outcome of installSkill: the skill is already installed, or an agent session
@@ -160,6 +242,8 @@ export interface PaneState {
   showRuns: boolean;
   /** The subagent panel: what this conversation's subagents are doing (#63). */
   showAgents: boolean;
+  /** The trajectory: every step of the conversation as one table. */
+  showTrajectory: boolean;
 }
 
 /** Which runtime the current connection drives: the bundled OpenCode sidecar, or
@@ -221,6 +305,17 @@ interface RuntimeState {
    *  which also makes it work in the gateway web client. */
   autoReview: boolean;
   setAutoReview: (enabled: boolean) => void;
+  /** Optional native notification when a turn settles (done / failed /
+   *  interrupted). Off by default; persisted locally like autoReview. */
+  turnNotify: boolean;
+  setTurnNotify: (enabled: boolean) => void;
+  /** Stall guard (#121): notice a turn that looks stuck and offer
+   *  Keep waiting / Stop — never auto-interrupt. Off by default. */
+  stallGuard: StallGuardConfig;
+  setStallGuard: (patch: Partial<StallGuardConfig>) => void;
+  /** Answer a stall warning on `sid`: keep waiting (dismiss + re-arm) or stop
+   *  (interrupt the session's turn). */
+  stallAction: (sid: string, stallKey: string, action: "keep-waiting" | "stop") => void;
   /** Non-blocking reviewer activity keyed by the foreground parent session. */
   backgroundReviews: Record<string, "queued" | "running">;
   cancelAutoReview: (sessionId: string) => void;
@@ -273,10 +368,16 @@ interface RuntimeState {
   // focused session (`currentId ?? DRAFT_KEY`) — the single-pane behavior.
   setAgentMode: (mode: AgentMode, sessionId?: string) => void;
   openArtifact: (a: ArtifactBlock, sessionId?: string) => void;
+  /** Open this artifact, or close the inspector when it is the one already
+   *  showing — what a second click on the same file card means. Separate from
+   *  `openArtifact` because not every caller is a toggle: opening a notebook
+   *  the agent just created must show it, never hide it. */
+  toggleArtifact: (a: ArtifactBlock, sessionId?: string) => void;
   closeArtifact: (sessionId?: string) => void;
   setShowFiles: (show: boolean, sessionId?: string) => void;
   setShowRuns: (show: boolean, sessionId?: string) => void;
   setShowAgents: (show: boolean, sessionId?: string) => void;
+  setShowTrajectory: (show: boolean, sessionId?: string) => void;
   answerQuestion: (requestId: string, answers: string[][]) => Promise<void>;
   rejectQuestion: (requestId: string) => Promise<void>;
   replyPermission: (requestId: string, reply: PermissionReply) => Promise<void>;
@@ -301,6 +402,9 @@ interface RuntimeState {
   /** Projects: named shared workspaces under `<base>/projects`. Sessions group
    *  under a project by `directory`; multiple sessions share the folder. */
   projects: ProjectInfo[];
+  /** The project list has been read at least once (it runs after the session
+   *  list), so "no project matches" can be trusted to mean Default. */
+  projectsLoaded: boolean;
   refreshProjects: () => Promise<void>;
   /** Create a project folder and move into it with a fresh pinned draft. */
   createProject: (name: string) => Promise<ProjectInfo | null>;
@@ -378,6 +482,11 @@ interface RuntimeState {
   /** Epoch ms the current sidecar started; 0 until known. Anything stored
    *  before it cannot be in flight now. */
   runtimeStartedAt: number;
+  /** Sessions a manual "compress context" was requested for. The POST admits
+   *  the request; the flag stays until the compaction part folds in
+   *  (`session.compacted`) or the session reports idle, and drives the spinner
+   *  on the composer's compact button. */
+  compactingSessions: Record<string, boolean>;
   /** Switch to an existing folder, or (with `dated`) create a new dated one.
    *  `key` is the draft slot the switch was made for — the folder becomes that
    *  draft's destination. Defaults to the global slot. */
@@ -392,7 +501,9 @@ interface RuntimeState {
   openSession: (id: string) => Promise<void>;
   /** Load a session's history into its thread WITHOUT switching the foreground
    *  folder/stream — for background split panes so they show their conversation
-   *  on launch instead of a skeleton until focused. No-op if already loaded. */
+   *  on launch instead of a skeleton until focused. No-op once loaded fine; a
+   *  failed load (historyError) is retried, so this also backs the error line's
+   *  Retry action (#139). */
   loadHistory: (id: string) => Promise<void>;
   /** `draftKey` (a `draft:<leafId>` slot) is the per-pane draft this send may
    *  lazily create a session from — passed by tiled panes so each unbound pane
@@ -413,6 +524,10 @@ interface RuntimeState {
   /** Interrupt a session's running turn (Stop button / Esc); the focused
    *  session when `sessionId` is omitted. */
   interrupt: (sessionId?: string) => Promise<void>;
+  /** Manually compact a session's context (composer button). Older turns are
+   *  summarized by the model into a "Context compacted" seam so subsequent
+   *  turns run on a bounded context. No-op on a draft. */
+  compactContext: (sessionId?: string) => Promise<void>;
   /** Edit a past user message: revert the session to (and including) that
    *  message — dropping it and everything after, rolling back the files those
    *  turns changed — then resend the corrected text as a new turn. Destructive:
@@ -827,6 +942,288 @@ const relayedSignIns = new Set<string>();
  *  and held across every trailing event; the next turn clears it (`turn → sid`). */
 const interruptedSessions = new Set<string>();
 
+/** Sessions whose CURRENT turn ended in a provider/runtime error (an `error`
+ *  SSE event), so the completion notification can tell "failed" from "done"
+ *  — `session.idle` fires after a failed turn too, with no flag of its own.
+ *  Cleared when the next turn starts, like interruptedSessions. */
+const erroredSessions = new Set<string>();
+
+/** Sessions whose CURRENT turn has already produced its completion
+ *  notification. One settle process calls onTurnIdle more than once — a
+ *  session error is followed by its own session.idle, and a user abort streams
+ *  several trailing idles — so without this guard a settled turn would notify
+ *  once per trailing event. Cleared when the next turn starts, like its two
+ *  outcome markers above. */
+const notifiedSettledSessions = new Set<string>();
+
+// ---- Stall guard (#121) ----
+// A per-session ledger mirroring sseLast's lifecycle (module-level, not in the
+// store): it is an event accounting detail, not UI state. The store holds only
+// the user's config; the ledger is fed and read by the event handler.
+
+/** Per-session stall ledger. Created on first use, dropped when the session's
+ *  turn settles and no new one starts — bounded by the sessions that actually
+ *  stream in this process. */
+const stallLedger = new Map<string, StallSessionState>();
+
+/** Stall warnings already shown (verdict keys). One reminder per trip: a
+ *  verdict must not re-fire on every later event until the ledger moves on.
+ *  `remember`-capped like the sibling dedup sets. */
+const stallWarnedKeys = new Set<string>();
+
+function stallStateFor(sid: string): StallSessionState {
+  let st = stallLedger.get(sid);
+  if (!st) {
+    st = createStallSessionState();
+    stallLedger.set(sid, st);
+  }
+  return st;
+}
+
+/** Drop every standing stall warning line from every thread. Called when the
+ *  guard is turned off — a warning that no longer matches the user's settings
+ *  is stale and would sit there forever. */
+function clearStallWarnings(): void {
+  useRuntimeStore.setState((s) => {
+    let changed = false;
+    const threads: Record<string, Thread> = {};
+    for (const [sid, cur] of Object.entries(s.threads)) {
+      const filtered = cur.blocks.filter((b) => !(b.kind === "status-line" && b.stall));
+      if (filtered.length !== cur.blocks.length) {
+        changed = true;
+        threads[sid] = { ...cur, blocks: filtered };
+      }
+    }
+    return changed ? { threads: { ...s.threads, ...threads } } : {};
+  });
+  stallWarnedKeys.clear();
+}
+
+/** Render one stall warning: a status line in the session's thread carrying
+ *  Keep waiting / Stop actions, plus (desktop only) a system notification.
+ *  Called once per trip — the caller has already checked stallWarnedKeys.
+ *
+ *  The thread line is appended on a MICROTASK, not synchronously: the guard
+ *  runs at the top of the event handler (where the ledger is fed), and the
+ *  SAME event's fold appends its own block after that. Appending the warning
+ *  synchronously would leave it stranded ABOVE the block the triggering event
+ *  just folded in. A microtask lands after the handler's synchronous work
+ *  (including the fold) but before any later event, so the warning reads as
+ *  the newest line in the turn. The dedup key and the notification are
+ *  synchronous — the microtask only defers the visual line. */
+function raiseStallWarning(sid: string, v: StallVerdict): void {
+  const channelText =
+    v.channel === "A"
+      ? i18n.t("session:stall.silentLine", { minutes: v.silenceMinutes })
+      : i18n.t("session:stall.repeatLine", { count: v.count });
+  // The armed key is scoped to the session: two sessions looping the same
+  // fingerprint are two separate trips and each deserves its own warning.
+  const key = `${sid}:${verdictKey(v)}`;
+  remember(stallWarnedKeys, key);
+  queueMicrotask(() => {
+    // The turn may have settled between the verdict and this microtask (an
+    // idle/error event arrived right after the trip) — a warning line has no
+    // place on a finished turn, and stallTurnSettled has already dropped it.
+    if (!stallLedger.get(sid)?.turnRunning) return;
+    useRuntimeStore.setState((s) => {
+      const cur = s.threads[sid] ?? emptyThread();
+      return {
+        threads: {
+          ...s.threads,
+          [sid]: {
+            ...cur,
+            loaded: true,
+            blocks: [
+              ...cur.blocks,
+              { kind: "status-line", text: channelText, tone: "error", stall: { key } },
+            ],
+          },
+        },
+      };
+    });
+  });
+  // Desktop only: the gateway web client has no native notifications.
+  if (isTauri) {
+    const body = sessionTitleFor(useRuntimeStore.getState, sid);
+    void notifyTurnComplete({
+      title:
+        v.channel === "A"
+          ? i18n.t("session:stall.silentTitle")
+          : i18n.t("session:stall.repeatTitle"),
+      body,
+    });
+  }
+  void logDebug(`stall guard: ${sid} → channel ${v.channel} (${key})`);
+}
+
+/** Feed one SSE event into the session's stall ledger, then check whether it
+ *  trips a channel. Call sites: the shared event handler (per event) — Channel
+ *  A trips on the FIRST event that arrives after N minutes of silence, which
+ *  is the honest zero-polling way to notice a stall. */
+function feedStallEvent(sid: string, event: OpenCodeEvent, now: number): void {
+  const cfg = useRuntimeStore.getState().stallGuard;
+  if (!cfg.enabled) return;
+  const st = stallStateFor(sid);
+  const before = st;
+  const after = applyStallEvent(st, event, now);
+  stallLedger.set(sid, after);
+  // An escape signal (new text/reasoning, a different call, a changed output,
+  // a new user instruction, a retry) moved the work on — the repetition being
+  // counted is over, so any earlier warning for this session is re-armable: if
+  // the SAME loop starts again later, it is a new trip worth one more warning.
+  // Detected as a change in what is being counted (fingerprint switched or the
+  // counter cleared).
+  if (
+    before.runFingerprint !== after.runFingerprint ||
+    (before.runCount > 0 && after.runCount === 0)
+  ) {
+    for (const k of [...stallWarnedKeys]) {
+      if (k.startsWith(`${sid}:`)) stallWarnedKeys.delete(k);
+    }
+  }
+  const verdict = stallVerdict(after, cfg, now);
+  if (verdict) {
+    const key = `${sid}:${verdictKey(verdict)}`;
+    if (!stallWarnedKeys.has(key)) raiseStallWarning(sid, verdict);
+  }
+}
+
+/** Mark a session's turn started in the stall ledger (call where the running
+ *  lock is armed after a send is accepted). */
+function stallTurnStarted(sid: string, now: number): void {
+  const st = stallStateFor(sid);
+  stallLedger.set(sid, markStallTurnRunning(st, now));
+  ensureStallTimer();
+}
+
+/** Mark a session's turn settled (call from onTurnIdle and the error path, the
+ *  two places the running lock clears). */
+function stallTurnSettled(sid: string): void {
+  const st = stallLedger.get(sid);
+  if (st) {
+    stallLedger.set(sid, markStallTurnIdle(st));
+  }
+  // A settled turn's warning line is stale — the user can now see the outcome
+  // (or the next turn starts fresh). Drop any warning that was still up.
+  useRuntimeStore.setState((s) => {
+    const cur = s.threads[sid];
+    if (!cur || !cur.blocks.some((b) => b.kind === "status-line" && b.stall)) return {};
+    return {
+      threads: {
+        ...s.threads,
+        [sid]: { ...cur, blocks: cur.blocks.filter((b) => !(b.kind === "status-line" && b.stall)) },
+      },
+    };
+  });
+  // Drop the session's ledger once its turn is over: a long-idle session must
+  // not hold state forever. It is recreated on the next turn or event.
+  stallLedger.delete(sid);
+  // No running turn may remain — let the silence timer stop itself.
+  maybeStopStallTimer(true);
+}
+
+// ---- Channel A's clock (silence is the ABSENCE of events) ----
+// Channel A cannot be driven by the event stream alone: a turn that went
+// silent and never emits again would never trip an event-driven check (this
+// was the v1 gap). It needs the wall clock. This timer is deliberately NOT a
+// global poller — it is an on-demand detector that only lives while a turn is
+// running AND Channel A is on, and stops itself the moment neither holds:
+//
+//   • armed from stallTurnStarted (a turn began) and setStallGuard,
+//   • self-stops when no session is in runningSessions (checked each tick and
+//     on every stallTurnSettled) or the guard/channel is switched off.
+//
+// A quiet interval is cheap precisely because it is idle most of the time;
+// the 30 s cadence bounds how late a silence warning can be (Channel A's
+// threshold is minutes, so 30 s is far finer than needed).
+
+const STALL_SILENCE_CHECK_MS = 30_000;
+let stallSilenceTimer: ReturnType<typeof setInterval> | null = null;
+
+/** Whether the guard wants Channel A at all. Deliberately does NOT require a
+ *  running turn at ARM time: the timer is armed from places that run before
+ *  the running lock lands (a send arms the ledger, then sets runningSessions a
+ *  line later). The timer self-stops on the first tick that finds no running
+ *  turn, so an over-eager arm costs at most one idle 30 s tick. */
+function stallSilenceGuardOn(): boolean {
+  const g = useRuntimeStore.getState();
+  return g.stallGuard.enabled && g.stallGuard.channelAEnabled;
+}
+
+/** Stop the timer when it no longer has a reason to run: the guard/channel
+ *  turned off, or (when `forRunning` is set) no turn is running. */
+function maybeStopStallTimer(forRunning = false): void {
+  if (stallSilenceTimer === null) return;
+  const g = useRuntimeStore.getState();
+  const running = Object.keys(g.runningSessions).length > 0;
+  if (!g.stallGuard.enabled || !g.stallGuard.channelAEnabled || (forRunning && !running)) {
+    clearInterval(stallSilenceTimer);
+    stallSilenceTimer = null;
+  }
+}
+
+/** Arm the silence timer if the guard wants it and it is not already running. */
+function ensureStallTimer(): void {
+  if (stallSilenceTimer !== null) return;
+  if (!stallSilenceGuardOn()) return;
+  stallSilenceTimer = setInterval(() => {
+    // The guard may have been switched off, or every turn may have settled,
+    // since the last tick — stop rather than spin.
+    if (!stallSilenceGuardOn()) {
+      maybeStopStallTimer();
+      return;
+    }
+    const cfg = useRuntimeStore.getState().stallGuard;
+    const now = Date.now();
+    // Channel A only: silence for a RUNNING session. The ledger may be absent
+    // (a turn this app did not start, e.g. after a reload) — its lastActivity
+    // is then unknown, and stallStateFor would mint a fresh clock, so a
+    // session whose turn predates the ledger must not be nagged from nothing.
+    const running = Object.keys(useRuntimeStore.getState().runningSessions);
+    if (running.length === 0) {
+      maybeStopStallTimer(true);
+      return;
+    }
+    for (const sid of running) {
+      const st = stallLedger.get(sid);
+      if (!st) continue;
+      const verdict = stallVerdict(st, cfg, now);
+      if (verdict?.channel === "A") {
+        const key = `${sid}:${verdictKey(verdict)}`;
+        if (!stallWarnedKeys.has(key)) raiseStallWarning(sid, verdict);
+      }
+    }
+  }, STALL_SILENCE_CHECK_MS);
+}
+
+/** The UI action behind a stall warning's Keep waiting / Stop buttons. */
+function handleStallAction(sid: string, key: string, action: "keep-waiting" | "stop"): void {
+  if (action === "stop") {
+    void useRuntimeStore.getState().interrupt(sid);
+    return;
+  }
+  // Keep waiting: the user is watching and believes the turn is alive. Remove
+  // THIS warning line, and treat the click as activity — restart Channel A's
+  // silence clock and Channel B's counter, so the next warning needs a full
+  // fresh silence period / repetition run rather than firing on the next tick
+  // or next identical call ("remind me later" must not mean "every 30 s").
+  const ledgerState = stallLedger.get(sid);
+  if (ledgerState) {
+    stallLedger.set(sid, resetStallAfterKeepWaiting(ledgerState, Date.now()));
+  }
+  stallWarnedKeys.delete(key);
+  useRuntimeStore.setState((s) => {
+    const cur = s.threads[sid];
+    if (!cur || !cur.blocks.some((b) => b.kind === "status-line" && b.stall?.key === key)) return {};
+    return {
+      threads: {
+        ...s.threads,
+        [sid]: { ...cur, blocks: cur.blocks.filter((b) => !(b.kind === "status-line" && b.stall?.key === key)) },
+      },
+    };
+  });
+}
+
 // ---- Auto-review (#72) ----
 // Per-token review state stays outside Zustand so a background reviewer never
 // repaints the foreground pane. The store only receives queued/running
@@ -1092,7 +1489,7 @@ function clearLiveFolds(sessionId: string) {
 function showOnly(
   s: { panes: Record<string, PaneState>; currentId: string | null },
   sessionId: string | undefined,
-  view: "showFiles" | "showRuns" | "showAgents",
+  view: "showFiles" | "showRuns" | "showAgents" | "showTrajectory",
   show: boolean,
 ): { panes: Record<string, PaneState> } {
   const key = sessionId ?? s.currentId ?? DRAFT_KEY;
@@ -1102,6 +1499,7 @@ function showOnly(
     showFiles: false,
     showRuns: false,
     showAgents: false,
+    showTrajectory: false,
   };
   const next: PaneState = show
     ? { ...base, [view]: true }
@@ -1110,6 +1508,7 @@ function showOnly(
         showFiles: p?.showFiles ?? false,
         showRuns: p?.showRuns ?? false,
         showAgents: p?.showAgents ?? false,
+        showTrajectory: p?.showTrajectory ?? false,
         [view]: false,
       };
   return { panes: { ...s.panes, [key]: next } };
@@ -1214,15 +1613,19 @@ async function performTurn(
       const chosen = isTauri ? get().draftWorkspaces[draftSrc] : undefined;
       if (isTauri) {
         set({ switching: true });
+        // The folder this session is MEANT to be created in. Both calls below
+        // return the canonical path they settled on, which is what the check
+        // after the reconnect compares against.
+        let intended = chosen ?? null;
         try {
           if (!chosen) {
-            await newDatedWorkspace(datedWorkspaceName());
+            intended = await newDatedWorkspace(datedWorkspaceName());
             await kernelReset().catch(() => {});
           } else if (chosen !== get().workspace) {
             // The active folder wandered off — opening any session follows it
             // into that session's folder. Go back to the one this draft was
             // aimed at, or the session lands wherever the user last looked (#69).
-            await setWorkspace(chosen);
+            intended = await setWorkspace(chosen);
             await kernelReset().catch(() => {});
           }
           // Always rebuild the scoped client: /new and /clear keep the folder,
@@ -1234,6 +1637,22 @@ async function performTurn(
         }
         if (get().status !== "ready" || !client) {
           throw new Error("Runtime did not reconnect before creating the session.");
+        }
+        // `createSession` files the conversation in whatever folder the RUNTIME
+        // is scoped to, and that was decided by the reconnect above — not by the
+        // folder this draft asked for. When the two disagree the session is
+        // recorded in one folder while its notebooks, figures and data are
+        // written in another, and nothing downstream can tell: the conversation
+        // reports "file not found" for files it produced itself, in a folder
+        // that still holds them. A session found in exactly that state is what
+        // this check exists for — the disagreement was silent, and the only
+        // moment it can still be caught is before the session exists. Refuse
+        // rather than create a conversation that is already wrong.
+        if (intended && !samePath(intended, get().workspace)) {
+          throw new Error(
+            `The runtime is working in ${get().workspace ?? "no folder"}, not ${intended}, ` +
+              `so this conversation would be filed apart from the files it creates. Try again.`,
+          );
         }
       }
       id = await withRetry(() => client!.createSession());
@@ -1298,7 +1717,18 @@ async function performTurn(
     }
     const sid = id;
     interruptedSessions.delete(sid); // a fresh turn folds its events normally
+    erroredSessions.delete(sid); // …and its outcome label starts clean
+    notifiedSettledSessions.delete(sid); // …and its notification may fire again
+    // …and any stall warning THIS session was carrying is stale (a fresh turn).
+    // Scoped to the session: a concurrent session's loop is still its own trip.
+    for (const k of [...stallWarnedKeys]) {
+      if (k.startsWith(`${sid}:`)) stallWarnedKeys.delete(k);
+    }
     void logDebug(`turn → ${sid}`);
+    // Stall guard: a fresh turn starts a fresh ledger (Channel A's silence
+    // clock, Channel B's counter). Base the clock here — a turn that produces
+    // nothing from the moment it was sent is the case Channel A exists for.
+    stallTurnStarted(sid, Date.now());
     // A fresh turn restarts step counting (the SDK resets its own counter on idle).
     if (get().stepCounts[sid])
       set((s) => {
@@ -1361,8 +1791,17 @@ async function performTurn(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     void logDebug(`turn FAILED: ${msg}`);
-    // The failure belongs next to the message that caused it.
-    const key = target ?? draftKey ?? get().currentId ?? DRAFT_KEY;
+    // The failure belongs next to the message that caused it. This must be the
+    // slot the turn actually lives in NOW, which is `lockKey`: it starts as the
+    // echo key and is re-pointed to the real session id when a draft's first
+    // send grafts the draft slot onto its new session (see above). Re-deriving
+    // `target ?? draftKey ?? currentId` here re-reads the STALE draft key after
+    // that graft deleted `threads[draftKey]` — so in a split layout, a first
+    // send that fails (bad model, provider error) wrote its "Send failed:" line
+    // into a slot no pane displays, and the user got nothing but a cleared
+    // composer. The lock cleanup in `finally` already tracks the current key for
+    // exactly this reason; the error must follow the same pointer.
+    const key = lockKey;
     set((s) => {
       const cur = s.threads[key] ?? emptyThread();
       return {
@@ -1377,6 +1816,8 @@ async function performTurn(
         },
       };
     });
+    // The return value keeps its original meaning: null when the session was
+    // never created (the caller treats that as "nothing to switch to").
     return target ?? get().currentId;
   } finally {
     // Clear the lock under its CURRENT key (`lockKey` follows the draft→session
@@ -1647,7 +2088,56 @@ function drainReviewQueue(set: StoreSet, get: StoreGet): void {
  * turn ended in a user interrupt: there is nothing to review, but the slot still
  * has to be released if the interrupted turn WAS the review.
  */
+/** Fire the optional turn-completion notification (Settings → turn notify).
+ *  Called from onTurnIdle BEFORE its early returns, so it also fires for
+ *  users whose turn goes down the auto-review path. Distinguishes the three
+ *  outcomes via the markers the event handler keeps: interruptedSessions
+ *  (user Stop) and erroredSessions (a real provider/runtime error).
+ *
+ *  Desktop only — the notification plugin falls back to the browser
+ *  Notification API in a plain browser, so the isTauri gate keeps the
+ *  desktop-only contract in code, not just behind the hidden Settings row
+ *  (the gateway web client and `pnpm dev` have no native notifications).
+ *
+ *  At most ONE notification per settled turn: a session error is followed by
+ *  its own session.idle, and a user abort streams several trailing idles, so
+ *  onTurnIdle — and this — runs once per trailing event. The
+ *  notifiedSettledSessions guard is checked and armed here, so whichever
+ *  trailing event lands first wins and the rest stay silent.
+ *
+ *  Deliberately silent for: background reviews (a second hidden turn the user
+ *  did not send — notifying on those would be noise), and subagent turns
+ *  (their settlement is part of the parent turn the user is watching). */
+function notifyTurnSettled(get: StoreGet, sid: string): void {
+  if (!isTauri) return;
+  if (!get().turnNotify) return;
+  if (get().backgroundReviews[sid] === "running" || get().backgroundReviews[sid] === "queued") return;
+  if (get().sessionParents[sid]) return;
+  if (notifiedSettledSessions.has(sid)) return;
+  const title = interruptedSessions.has(sid)
+    ? i18n.t("pages:notify.interruptedTitle")
+    : erroredSessions.has(sid)
+      ? i18n.t("pages:notify.failedTitle")
+      : i18n.t("pages:notify.completeTitle");
+  remember(notifiedSettledSessions, sid);
+  void notifyTurnComplete({ title, body: sessionTitleFor(get, sid) });
+}
+
+/** The session's own title for a notification body, falling back to its id. */
+function sessionTitleFor(get: StoreGet, sid: string): string {
+  return get().sessions.find((s) => s.id === sid)?.title || sid;
+}
+
 function onTurnIdle(set: StoreSet, get: StoreGet, sid: string, reviewable: boolean): void {
+  // Before any of the early returns below. A turn settling is exactly when the
+  // mirror is worth refreshing, and both of those returns are ordinary paths —
+  // with auto-review on, the normal turn takes one of them, so scheduling at
+  // the end of this function meant sync never ran for those users at all.
+  scheduleConversationSync(get);
+  notifyTurnSettled(get, sid);
+  // The turn is over — the stall guard's silence clock and repetition counter
+  // have nothing left to watch, and a standing warning is stale.
+  stallTurnSettled(sid);
   if (finishAutoReview(set, get, sid, reviewable)) return;
   // This turn's own changes are settled either way, so clear them. A review the
   // session was already OWED is different: the files that earned it are on disk
@@ -1689,6 +2179,22 @@ function onTurnIdle(set: StoreSet, get: StoreGet, sid: string, reviewable: boole
     } else void startAutoReview(set, get, sid, scope);
     return;
   }
+}
+
+/** Mirror conversations out once a turn has settled (#124). Debounced and
+ *  fire-and-forget: sync is a background convenience, so it must never delay a
+ *  turn, and a failure belongs in the Settings card rather than over the
+ *  conversation the user is reading. A no-op until a folder is chosen. */
+let syncTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleConversationSync(get: StoreGet): void {
+  if (!syncDir()) return;
+  if (syncTimer) clearTimeout(syncTimer);
+  // A burst of turns (subagents settling one after another) is one pass, not
+  // one per session: each pass spawns a process per changed conversation.
+  syncTimer = setTimeout(() => {
+    syncTimer = null;
+    void runSync(get().sessions.map((s) => ({ id: s.id, updated: s.updated }))).catch(() => {});
+  }, 4_000);
 }
 
 /** Shared core of the two destructive "go back to a past message" actions
@@ -1841,19 +2347,29 @@ function modelForSession(state: RuntimeState, key: string): { model: string | nu
   return { model, variant };
 }
 
-/** Context window of the model a session's next turn will actually use, or 0
- *  when nothing knows it.
+/** Which model string is in force for a pane, resolving a configured agent's
+ *  own model rather than collapsing it to null.
  *
  *  Deliberately NOT `modelForSession` — that returns `model: null` when a
  *  configured agent owns the model, which is the right thing to SEND and the
- *  wrong thing to look a context window up by. Here the question is only which
- *  model string is in force, so the agent's own setting is resolved instead of
- *  collapsed to null. 0 means unknown (see `ProviderModelInfo.contextLimit`);
+ *  wrong thing to ask questions ABOUT the model with. Callers here are naming
+ *  the model to the user or looking its window up, never sending it.
+ *
+ *  `key` is null on a pane with no session yet, where the global default is the
+ *  honest answer: that is what its first turn will use. */
+function modelInForce(state: RuntimeState, key: string | null): string | null {
+  if (!key) return state.defaultModel;
+  const agent = agentForTurn(state, key);
+  return (
+    state.sessionModels[key] ?? (agent ? state.agentModels[agent] : undefined) ?? state.defaultModel
+  );
+}
+
+/** Context window of the model a session's next turn will actually use, or 0
+ *  when nothing knows it. 0 means unknown (see `ProviderModelInfo.contextLimit`);
  *  callers show tokens without a percentage rather than inventing a limit. */
 export function contextLimitFor(state: RuntimeState, key: string): number {
-  const agent = agentForTurn(state, key);
-  const model =
-    state.sessionModels[key] ?? (agent ? state.agentModels[agent] : undefined) ?? state.defaultModel;
+  const model = modelInForce(state, key);
   if (!model) return 0;
   const i = model.indexOf("/");
   if (i <= 0) return 0;
@@ -1921,6 +2437,44 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
     }
   },
   backgroundReviews: {},
+  turnNotify: initialTurnNotify(),
+  setTurnNotify: (enabled) => {
+    if (typeof window !== "undefined") {
+      if (enabled) window.localStorage.setItem(TURN_NOTIFY_KEY, "1");
+      else window.localStorage.removeItem(TURN_NOTIFY_KEY);
+    }
+    set({ turnNotify: enabled });
+  },
+  stallGuard: initialStallGuardConfig(),
+  setStallGuard: (patch) => {
+    // Clamp here as well as in the UI: a hostile or buggy caller must not be
+    // able to store a threshold that breaks the feature (0 → warn instantly,
+    // negative → nonsense, huge → never warn).
+    const merged = { ...get().stallGuard, ...patch };
+    const next: StallGuardConfig = {
+      ...merged,
+      silenceMinutes:
+        typeof merged.silenceMinutes === "number" &&
+        Number.isFinite(merged.silenceMinutes)
+          ? Math.max(1, Math.min(1440, Math.round(merged.silenceMinutes)))
+          : get().stallGuard.silenceMinutes,
+      repeatThreshold:
+        typeof merged.repeatThreshold === "number" &&
+        Number.isFinite(merged.repeatThreshold)
+          ? Math.max(2, Math.min(100, Math.round(merged.repeatThreshold)))
+          : get().stallGuard.repeatThreshold,
+    };
+    persistStallGuardConfig(next);
+    set({ stallGuard: next });
+    // Turning the guard off (or changing its thresholds) retires any standing
+    // warnings: a line that no longer matches the user's settings is stale.
+    if (!next.enabled) clearStallWarnings();
+    // Channel A's silence clock follows the config: armed when a turn is
+    // running and silence-watching is on, stopped when either ends.
+    if (next.enabled && next.channelAEnabled) ensureStallTimer();
+    else maybeStopStallTimer();
+  },
+  stallAction: (sid, key, action) => handleStallAction(sid, key, action),
   cancelAutoReview: (sessionId) => {
     const queuedAt = reviewQueue.indexOf(sessionId);
     if (queuedAt >= 0) reviewQueue.splice(queuedAt, 1);
@@ -1987,6 +2541,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   setAgentMode: (mode, sessionId) =>
     set((s) => ({ sessionAgents: { ...s.sessionAgents, [sessionId ?? s.currentId ?? DRAFT_KEY]: mode } })),
   projects: [],
+  projectsLoaded: false,
   workspace: null,
   webWorkspace: null,
   webReadOnly: false,
@@ -1998,6 +2553,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   stepCounts: {},
   shellTurns: {},
   retryNotices: {},
+  compactingSessions: {},
   runtimeStartedAt: 0,
 
   // These write the CURRENT session's pane (DRAFT_KEY on a draft), keeping the
@@ -2012,9 +2568,23 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
           showFiles: false,
           showRuns: false,
           showAgents: false,
+          showTrajectory: false,
         },
       },
     })),
+  toggleArtifact: (artifact, sessionId) => {
+    const s = get();
+    const key = sessionId ?? s.currentId ?? DRAFT_KEY;
+    // Same file already in the inspector ⇒ the click is asking to put it away.
+    // Keyed on `path`, which is the file's identity here: `filename` repeats
+    // across directories, and the block object itself is rebuilt on every
+    // thread re-render so it can never be compared by reference.
+    if (s.panes[key]?.artifact?.path === artifact.path) {
+      s.closeArtifact(sessionId);
+      return;
+    }
+    s.openArtifact(artifact, sessionId);
+  },
   closeArtifact: (sessionId) =>
     set((s) => {
       const key = sessionId ?? s.currentId ?? DRAFT_KEY;
@@ -2027,6 +2597,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
             showFiles: p?.showFiles ?? false,
             showRuns: p?.showRuns ?? false,
             showAgents: p?.showAgents ?? false,
+            showTrajectory: p?.showTrajectory ?? false,
           },
         },
       };
@@ -2035,6 +2606,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   setShowFiles: (show, sessionId) => set((s) => showOnly(s, sessionId, "showFiles", show)),
   setShowRuns: (show, sessionId) => set((s) => showOnly(s, sessionId, "showRuns", show)),
   setShowAgents: (show, sessionId) => set((s) => showOnly(s, sessionId, "showAgents", show)),
+  setShowTrajectory: (show, sessionId) => set((s) => showOnly(s, sessionId, "showTrajectory", show)),
 
   answerQuestion: async (requestId, answers) => {
     const q = get().questions.find((x) => x.requestId === requestId);
@@ -2452,11 +3024,28 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
         event.type === "text.updated" &&
         backgroundReviewResultParts.has(`${event.sessionId}:${event.partId}`);
       if ("sessionId" in event && event.sessionId) {
-        sseLast.set(event.sessionId, ++sseSeq);
+        const sid = event.sessionId;
+        sseLast.set(sid, ++sseSeq);
         while (sseLast.size > 500) {
           const oldest = sseLast.keys().next().value;
           if (oldest === undefined) break;
           sseLast.delete(oldest);
+        }
+        // Stall guard: feed the event into the session's ledger and check for a
+        // verdict. Excluded for a background review's own turn — its repetition
+        // is part of the parent turn the user is watching, and it is a hidden
+        // turn the user never sent. Subagent sessions are NOT excluded: a
+        // subagent stuck in a loop is exactly what the user wants to be told
+        // about (unlike a settlement notification, which would be noise). The
+        // interrupted flag is honoured: after the user hits Stop the abort's
+        // own trailing events must not raise a "stuck?" warning over a turn the
+        // user already chose to end.
+        if (
+          !backgroundReviewParent &&
+          !retiredBackgroundReviews.has(sid) &&
+          !interruptedSessions.has(sid)
+        ) {
+          feedStallEvent(sid, event, Date.now());
         }
         // First streamed token after a send → log latency (multi-pane probe).
         const posted = turnPostAt.get(event.sessionId);
@@ -2503,6 +3092,13 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
           return;
         }
         if (sid && interruptedSessions.has(sid)) return;
+        // A real failure (not an interrupt's own "aborted"): remember it so the
+        // completion notification can say "failed" instead of "done".
+        // `remember`, not a bare add: this is only cleared when that same
+        // session starts another turn, so a session that errors and is never
+        // returned to would sit in the set for the life of the process. Every
+        // other marker here is capped for the same reason.
+        if (sid) remember(erroredSessions, sid);
         // The retry notice this session is carrying (about to be cleared below)
         // is the only place the CAUSE was ever named: the final error text says
         // what failed, the action said why the account could not make the call.
@@ -2670,6 +3266,22 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
         });
       }
       if (event.type === "session.idle") clearLiveFolds(sid);
+      // A manual compaction finished: the "Context compacted" seam just folded
+      // in, so subsequent turns already run on the bounded context. Clear the
+      // composer spinner and confirm. Idle also clears, as a safety net: a
+      // compaction that ends without a visible part must not pin the flag and
+      // leave the button spinning forever.
+      if (
+        get().compactingSessions[sid] &&
+        (event.type === "session.compacted" || event.type === "session.idle")
+      ) {
+        set((s) => {
+          const compactingSessions = { ...s.compactingSessions };
+          delete compactingSessions[sid];
+          return { compactingSessions };
+        });
+        if (event.type === "session.compacted") toast.success(i18n.t("runtime.compact.done"));
+      }
       // Idle after a user interrupt: the thread already ends with "Interrupted"
       // — keep the locks clear and skip the fold. An abort can emit MORE than
       // one idle, so the guard must survive every trailing idle (`.has`, not
@@ -3254,7 +3866,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   refreshProjects: async () => {
     if (!isTauri && !isGatewayWeb) return;
     try {
-      set({ projects: await listProjects() });
+      set({ projects: await listProjects(), projectsLoaded: true });
     } catch {
       /* ignore transient scan failures */
     }
@@ -3298,6 +3910,7 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   deleteProject: async (id) => {
     try {
       await deleteProjectCmd(id);
+      useLayoutStore.getState().releaseProject(id);
     } catch (err) {
       set({ error: err instanceof Error ? err.message : String(err) });
     }
@@ -3401,7 +4014,30 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
         // the previous folder delivers NOTHING for this session — the turn runs
         // and the page shows nothing happening.
         if (isGatewayWeb) set({ webWorkspace: dir, workspace: dir });
-        else await setWorkspace(dir).catch(() => {});
+        else {
+          // A failure here used to be swallowed, and everything below then ran
+          // against the folder we had FAILED to leave: the reconnect scoped the
+          // stream to it, the kernel stayed in it, `markSession` stamped this
+          // session's id into it, and every file this conversation names
+          // resolved there — so its own notebooks and figures came back "file
+          // not found" while the app looked like it had followed the session.
+          // The folder is the premise of everything after it; if we could not
+          // move, say so and do none of it.
+          try {
+            await setWorkspace(dir);
+          } catch (err) {
+            // Only the still-current open may speak, like every step below it:
+            // the user may have opened another session while this one was in
+            // flight, and a folder THAT session does not care about must not
+            // put an error over it.
+            if (seq !== openSessionSeq) return;
+            const detail = err instanceof Error ? err.message : String(err);
+            set({
+              error: `Could not open ${dir}, the folder this conversation works in (${detail}). Its files will not open until that folder is reachable.`,
+            });
+            return;
+          }
+        }
         // A newer openSession has superseded this one — stop before starting a
         // second, dueling connectRetry. Two reconnect loops tear down each
         // other's in-flight EventSource, leaking half-open sockets until the
@@ -3410,7 +4046,15 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
         if (seq !== openSessionSeq) return;
         await kernelReset().catch(() => {});
         if (seq !== openSessionSeq) return;
-        await get().connectRetry();
+        const reconnected = await get().connectRetry();
+        if (seq !== openSessionSeq) return;
+        // A reconnect window that ran out of patience means the runtime is not
+        // there. Nothing below — pending-request recovery, the history fetch —
+        // can work against a dead sidecar, so stop and leave the session
+        // unloaded: the next successful connect re-runs this open. (Fetching
+        // anyway used to plant a failed "history load" error line that the
+        // loaded-gate then cached for the whole run; #139.)
+        if (!reconnected) return;
       } finally {
         // Only the still-current open clears `switching`; a superseded one must
         // not flip it off while the winner is mid-reconnect.
@@ -3444,7 +4088,34 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
     })();
     // A session reopened while "Working…" may have finished behind our back.
     void get().reconcileRunning();
-    if (get().threads[id]?.loaded) return;
+    // A FAILED load must not count as "already loaded": the session would show
+    // its error line for the rest of the run, because every later open hit this
+    // early return and never refetched (#139). Only a load that succeeded (or
+    // one still pending) closes the door — `historyError` reopens it.
+    if (get().threads[id]?.loaded && !get().threads[id]?.historyError) return;
+    // Never fetch history from a runtime that is not serving yet. A restored
+    // session can reach this point while the sidecar is still booting — the
+    // event stream to the shared instance is up while the session's own folder
+    // instance is still initializing — and a fetch inside that window fails at
+    // the network level (WebKit surfaces it as "Load failed"). Wait for ready:
+    // join an in-flight retry window (launch, a folder or model switch) rather
+    // than starting a dueling loop that tears down its event stream; if the
+    // window runs out, stay out — the offline screen is showing and the next
+    // successful connect re-runs this open.
+    if (get().status !== "ready") {
+      let ready: boolean;
+      if (connectRetryDepth > 0) {
+        while (connectRetryDepth > 0) {
+          await sleep(100);
+          const st = get().status;
+          if (st === "ready" || st === "error") break;
+        }
+        ready = get().status === "ready";
+      } else {
+        ready = await get().connectRetry();
+      }
+      if (!ready || seq !== openSessionSeq || get().currentId !== id) return;
+    }
     try {
       const messages = await client.getMessages(id);
       // The command templates are what turn a stored expansion back into the
@@ -3478,13 +4149,26 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       const msg = err instanceof Error ? err.message : String(err);
       if (seq !== openSessionSeq || get().currentId !== id) return;
       set((s) => ({
-        error: msg,
         threads: {
           ...s.threads,
           [id]: {
             ...emptyThread(),
             loaded: true,
-            blocks: [{ kind: "status-line", text: `Failed to load messages: ${msg}`, tone: "error" }],
+            historyError: msg,
+            // The thread renders a retryable error line: `historyError` keeps
+            // the next open/Retry from being swallowed by the loaded-gate, so
+            // this failure is the end of ONE attempt, not of the session. The
+            // error is deliberately NOT mirrored into the global `error` (no
+            // stale banner): it is a session-level problem with a session-level
+            // way out (#139).
+            blocks: [
+              {
+                kind: "status-line",
+                text: `Failed to load messages: ${msg}`,
+                tone: "error",
+                retry: true,
+              },
+            ],
           },
         },
       }));
@@ -3493,7 +4177,13 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
 
   loadHistory: async (id) => {
     const c = client;
-    if (!c || get().threads[id]?.loaded) return;
+    if (!c) return;
+    const cur = get().threads[id];
+    // Loaded-and-fine threads are done; everything else — never tried, or tried
+    // and failed (historyError) — is fetched. The failure case is what makes a
+    // background pane self-heal on the next pass, and what powers the error
+    // line's Retry action (#139).
+    if (cur?.loaded && !cur?.historyError) return;
     try {
       // getMessages is session-scoped (server routes by the session's folder),
       // so any connected client works — no folder switch, unlike openSession.
@@ -3501,7 +4191,12 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       // Same reason as openSession: without the command templates a stored
       // slash-command expansion renders raw.
       if (catalogInFlight && get().commands.length === 0) await catalogInFlight;
-      if (get().threads[id]?.loaded) return; // a live fold beat us to it
+      // Only skip when a REAL load landed meanwhile. A live fold sets `loaded`
+      // but cannot clear a prior `historyError`, so it must not swallow our
+      // reload — the fold's partial content would leave the stale error line
+      // and marker in place.
+      const latest = get().threads[id];
+      if (latest?.loaded && !latest?.historyError) return;
       set((s) => ({
         threads: { ...s.threads, [id]: { ...historyToThread(messages, s.commands), loaded: true } },
         sessionAgents: { ...s.sessionAgents, [id]: lastAgentMode(messages) },
@@ -3512,7 +4207,10 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
           : {}),
       }));
     } catch {
-      /* best-effort; the pane keeps its skeleton and loads on focus */
+      /* best-effort: a never-loaded pane keeps its skeleton; a thread that had
+       * already failed keeps its retryable error line. Either way a later
+       * load — focus via openSession, another pass here, or the Retry button —
+       * tries again. */
     }
   },
 
@@ -3540,8 +4238,16 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       // echo and the spinner must appear on click, not after a multi-MB read.
       (sid) =>
         withRetry(async () => {
-          const files = await imageAttachmentParts(attachments ?? []);
-          await client!.sendPrompt(sid, text, agent, model, variant, files);
+          const { parts, dropped } = await imageAttachmentParts(attachments ?? []);
+          // A picture that could not be read is NOT sent, and the prompt still
+          // names the file — so without this the model answers about a figure
+          // it never saw, and nothing anywhere says so.
+          if (dropped.length > 0) {
+            toast.error(
+              i18n.t("session:composer.error.imageNotSent", { names: dropped.join(", ") }),
+            );
+          }
+          await client!.sendPrompt(sid, text, agent, model, variant, parts);
         }),
       // An ACP turn is a SYNC turn: `session/prompt` is one JSON-RPC request that
       // answers when the turn is over, where OpenCode's `prompt_async` answers as
@@ -3585,6 +4291,36 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       sessionId,
       draftKey,
     );
+  },
+
+  compactContext: async (sessionId) => {
+    const sid = sessionId ?? get().currentId;
+    if (!sid || !client) return;
+    // Compacting while a turn streams would race the model loop (the endpoint
+    // refuses a busy session too). The composer disables the button while the
+    // session is working, so this guard is for programmatic callers.
+    if (get().runningSessions[sid]) {
+      toast.error(i18n.t("runtime.compact.busy"));
+      return;
+    }
+    // Summarize with the session's OWN provider/model. Never a global
+    // context-limit override: that config is shared, so squeezing this
+    // conversation would squeeze every other session on the same model.
+    const meta = get().sessions.find((s) => s.id === sid);
+    set((s) => ({ compactingSessions: { ...s.compactingSessions, [sid]: true } }));
+    try {
+      await client.compactSession(sid, meta?.model?.providerID, meta?.model?.id);
+    } catch (err) {
+      set((s) => {
+        const compactingSessions = { ...s.compactingSessions };
+        delete compactingSessions[sid];
+        return {
+          compactingSessions,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      });
+      toast.error(i18n.t("runtime.compact.error"));
+    }
   },
 
   interrupt: async (sessionId) => {
@@ -3860,7 +4596,9 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       // Its OWN Screen with its own pane. Binding the install onto whatever pane
       // happened to be focused took over a conversation the user was in the
       // middle of — an install is a new piece of work, not a hijack.
-      useLayoutStore.getState().openInNewGroup(id, title);
+      // Filed under Default, like the session itself: an install belongs to
+      // no project.
+      useLayoutStore.getState().openInNewGroup(id, DEFAULT_PROJECT);
       // The turn goes through the normal send path (echo, running lock, error
       // line, stream folding) — hand-rolling the POST left the pane with no
       // message, no spinner and no way to tell a failure from a slow model.

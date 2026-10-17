@@ -68,7 +68,10 @@ pub fn sidecar_url(state: &RuntimeState) -> Option<String> {
     state.lifecycle.lock().unwrap().url.clone()
 }
 
-fn xdg_config_home(env: &Env) -> Result<PathBuf, String> {
+/// Public because the runtime CLI has to be invoked with the SAME dirs as the
+/// sidecar — `session_sync` shells out to `opencode export`/`import`, and a CLI
+/// pointed at different XDG dirs would silently read and write another store.
+pub fn xdg_config_home(env: &Env) -> Result<PathBuf, String> {
     Ok(runtime_root(env)?.join("xdg-config"))
 }
 
@@ -133,6 +136,14 @@ fn persisted_path(raw: &str) -> String {
 /// The active workspace folder OpenCode / the kernel / previews / provenance all
 /// operate in. Defaults to the base folder (`~/Documents/OpenScience`) until the
 /// user opens or creates another one; the choice persists across restarts.
+///
+/// The active folder is returned as it is. It is NOT given the base layout:
+/// `projects/` and `sessions/` are the base folder's two collections, and the
+/// active folder is any folder the user opened — a session folder, a project, a
+/// git checkout of their own. Creating those two directories inside every one of
+/// them wrote empty folders into the user's own repositories and made the app
+/// look like it had lost their sessions, since the pair it planted was always
+/// empty while the real collections were somewhere else entirely.
 pub fn workspace_dir(env: &Env) -> Result<PathBuf, String> {
     if let Ok(f) = active_workspace_file(env) {
         if let Ok(s) = std::fs::read_to_string(&f) {
@@ -140,7 +151,7 @@ pub fn workspace_dir(env: &Env) -> Result<PathBuf, String> {
             // unwrap it on read so those users are repaired without a re-pick.
             let dir = PathBuf::from(persisted_path(s.trim()));
             if dir.is_dir() {
-                return ensure_base_layout(dir);
+                return Ok(dir);
             }
         }
     }
@@ -151,11 +162,24 @@ pub fn workspace_dir(env: &Env) -> Result<PathBuf, String> {
 /// A folder the user picked in Settings wins; the default is `~/Documents/OpenScience`
 /// (no space — the agent runs shell commands against this path, and unquoted
 /// spaces break them), falling back to `$HOME/Documents`.
+///
+/// Both branches see to the layout, so the two collections exist wherever the
+/// base is. The picked branch used not to, and got away with it only because
+/// `workspace_dir` ensured the layout on the ACTIVE folder — which repaired the
+/// base by coincidence whenever the two happened to be the same folder, and
+/// littered every other folder the user opened when they were not. This is the
+/// one place that pair of directories belongs.
+///
+/// On a base that already exists the repair is best-effort: this is a lookup on
+/// a hot path (every gateway file request resolves through it), and a folder
+/// that is present but momentarily unwritable — a read-only volume, a cloud
+/// drive mid-sync — must still resolve rather than turn a read into an error.
 pub fn base_workspace_dir(env: &Env) -> Result<PathBuf, String> {
     if let Ok(f) = base_workspace_file(env) {
         if let Ok(s) = std::fs::read_to_string(&f) {
             let dir = PathBuf::from(persisted_path(s.trim()));
             if dir.is_dir() {
+                let _ = ensure_base_layout(dir.clone());
                 return Ok(dir);
             }
         }
@@ -495,6 +519,48 @@ fn adopt_bundled_plugin_dependency(package_json: &Path, bundled_spec: &str) -> R
     std::fs::write(package_json, out).map_err(|e| e.to_string())
 }
 
+/// Drop the entry-point fields from the profile's own `package.json`.
+///
+/// This file is read by the runtime whenever it resolves a plugin the config
+/// names **by path** — not only the plugin whose package it is. `main` (and
+/// `exports`) there win over the file the `plugin` array actually names, so
+/// every path plugin sitting in this directory — `browser-guard.ts`,
+/// `history-guard.ts`, and this one — is loaded from `main` instead of itself.
+/// The guards then never register their hooks, silently: the module that does
+/// load is a valid plugin, so nothing is logged and nothing looks wrong until a
+/// browser call is refused for a lease that was never attached (#151).
+///
+/// `dependencies` and every other key are left exactly as they are — only our
+/// own entry-point fields go, so a user's own edits survive. A missing file is
+/// fine (a fresh profile has none yet), and the write happens only when
+/// something was actually removed, which keeps this idempotent across the
+/// "refresh on every start" passes.
+fn strip_plugin_entry_points(package_json: &Path) -> Result<(), String> {
+    let Ok(text) = std::fs::read_to_string(package_json) else {
+        return Ok(());
+    };
+    let mut doc: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+        format!(
+            "{} is not readable JSON ({e}) — left as it is",
+            package_json.display()
+        )
+    })?;
+    let object = doc
+        .as_object_mut()
+        .ok_or_else(|| format!("{} is not a JSON object", package_json.display()))?;
+    // Not `any`: it short-circuits, and `exports` would survive a removed `main`.
+    let mut removed = false;
+    for key in ["main", "exports"] {
+        removed |= object.remove(key).is_some();
+    }
+    if !removed {
+        return Ok(());
+    }
+    let mut out = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?;
+    out.push('\n');
+    std::fs::write(package_json, out).map_err(|e| e.to_string())
+}
+
 /// Is this lockfile ours alone to replace? It is when it resolves no root
 /// dependency other than the OpenCode plugin: a stale one pins the old version
 /// (the July profile's lock named 1.17.13), and the next `npm install` would
@@ -547,6 +613,11 @@ fn deploy_goal_plugin_dependencies(src: &Path, dst: &Path) -> Result<(), String>
     let package_json = dst.join("package.json");
     let package_lock = dst.join("package-lock.json");
     let node_modules = dst.join("node_modules");
+    // Before the "already deployed" fast path below, deliberately: a profile
+    // whose dependency tree is already correct still needs this, and that is
+    // exactly the affected install — shipped with `main`, otherwise up to date,
+    // so it would take the early return and never be repaired.
+    strip_plugin_entry_points(&package_json)?;
     let dependency_ready = package_dependency_version(&package_json, OPENCODE_PLUGIN_PACKAGE)
         .is_some_and(|spec| dependency_pins(&spec, expected))
         && installed_package_version(&node_modules, OPENCODE_PLUGIN_PACKAGE).as_deref()
@@ -589,6 +660,10 @@ fn deploy_goal_plugin_dependencies(src: &Path, dst: &Path) -> Result<(), String>
     if !package_lock.exists() || lock_resolves_nothing_else(&package_lock) {
         std::fs::copy(&src_lock, &package_lock).map_err(|e| e.to_string())?;
     }
+    // The copy branch above writes the bundled package.json verbatim — `main`
+    // included — so a fresh profile needs this after the write as well, not
+    // only in front of the fast path.
+    strip_plugin_entry_points(&package_json)?;
 
     if !package_dependency_version(&package_json, OPENCODE_PLUGIN_PACKAGE)
         .is_some_and(|spec| dependency_pins(&spec, expected))
@@ -688,6 +763,52 @@ fn deploy_workbench_tools(env: &Env) {
             eprintln!("failed to deploy workbench tool {}: {e}", path.display());
         }
     }
+}
+
+/// Ship the computer-use host layer next to the tools that import it.
+///
+/// `tools/computer.ts` reaches it as `../computer/index`, so this has to land as
+/// a sibling of the tools directory rather than inside it — `deploy_workbench_tools`
+/// deliberately copies files only, and a directory dropped in there would be
+/// loaded as a tool and fail.
+fn deploy_computer_runtime(env: &Env) {
+    let Some(src) = env.resource("computer").filter(|p| p.is_dir()) else {
+        return; // a build without the bundled resources
+    };
+    let Ok(config_home) = xdg_config_home(env) else {
+        return;
+    };
+    let dst = config_home.join("opencode").join("computer");
+    if let Err(e) = std::fs::create_dir_all(&dst) {
+        eprintln!("failed to create computer runtime directory: {e}");
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(&src) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name() else {
+            continue;
+        };
+        if let Err(e) = std::fs::copy(&path, dst.join(name)) {
+            eprintln!("failed to deploy computer runtime {}: {e}", path.display());
+        }
+    }
+}
+
+/// The bundled native computer-use providers, when this build carries them.
+///
+/// Three files, one per platform, staged into one directory by
+/// `scripts/dev/build-computer-use.sh`. The macOS one is a separate signed app
+/// bundle: Accessibility and Screen Recording are granted per bundle identifier,
+/// so the helper holds those two grants under its own identity instead of the
+/// whole workbench asking for them.
+pub fn computer_use_provider_dir(env: &Env) -> Option<PathBuf> {
+    env.resource("computer-use").filter(|p| p.is_dir())
 }
 
 /// App-owned prompt files deployed into the OpenCode profile: the `reviewer`
@@ -1172,12 +1293,18 @@ fn read_proxy_setting(env: &Env) -> (String, String) {
     }
 }
 
-/// Accept `http://`, `https://` or `socks5://` with a host:port.
+/// Accept `http://` or `https://` with a host:port. Not SOCKS: the Bun inside
+/// OpenCode rejects a `socks5://` HTTPS_PROXY outright (`UnsupportedProxyProtocol`
+/// on every fetch — see `system_proxy`), so saving one would cut the agent off
+/// from every provider. Clients such as Clash serve HTTP on the same "mixed" port.
 fn validate_proxy_url(url: &str) -> Result<(), String> {
-    let rest = ["http://", "https://", "socks5://"]
+    if url.to_ascii_lowercase().starts_with("socks") {
+        return Err("SOCKS proxies are not supported by the agent runtime; use the proxy's HTTP port (Clash: the mixed port, e.g. http://127.0.0.1:7890)".into());
+    }
+    let rest = ["http://", "https://"]
         .iter()
         .find_map(|s| url.strip_prefix(s))
-        .ok_or("proxy URL must start with http://, https:// or socks5://")?;
+        .ok_or("proxy URL must start with http:// or https://")?;
     let hostport = rest.trim_end_matches('/');
     let (host, port) = hostport
         .rsplit_once(':')
@@ -1223,17 +1350,30 @@ fn resolve_proxy_env(mode: &str, url: &str) -> Vec<(&'static str, String)> {
             {
                 return Vec::new();
             }
-            match system_proxy_url() {
-                Some(sys) => vec![
-                    ("HTTP_PROXY", sys.clone()),
-                    ("HTTPS_PROXY", sys),
-                    ("NO_PROXY", NO_PROXY_LOOPBACK.to_string()),
-                ],
+            match crate::system_proxy::detect() {
+                Some(sys) => {
+                    let no_proxy = std::iter::once(NO_PROXY_LOOPBACK.to_string())
+                        .chain(sys.bypass)
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    vec![
+                        ("HTTP_PROXY", sys.url.clone()),
+                        ("HTTPS_PROXY", sys.url),
+                        ("NO_PROXY", no_proxy),
+                    ]
+                }
                 None => Vec::new(),
             }
         }
     }
 }
+
+/// The proxy the running sidecar was started with (`effective_proxy` at spawn;
+/// "" = direct). A sidecar's environment is fixed when it starts, so when the
+/// system proxy changes afterwards — Clash switched on after the app — the
+/// sidecar keeps the old route until it restarts; Settings compares the two to
+/// say so. None until this process has started a sidecar.
+static SIDECAR_PROXY: Mutex<Option<String>> = Mutex::new(None);
 
 /// The proxy the sidecar would actually use right now, for display in
 /// Settings. None ⇒ direct connections.
@@ -1244,7 +1384,7 @@ fn effective_proxy(mode: &str, url: &str) -> Option<String> {
         _ => ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"]
             .iter()
             .find_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
-            .or_else(system_proxy_url),
+            .or_else(|| crate::system_proxy::detect().map(|sys| sys.url)),
     }
 }
 
@@ -1312,48 +1452,6 @@ pub fn sidecar_proxy_env(env: &Env) -> Vec<(&'static str, String)> {
     resolve_proxy_env(&mode, &url)
 }
 
-/// The system-configured proxy as a URL, if one is enabled (macOS: scutil).
-/// HTTP(S) proxies are preferred — an HTTPS proxy endpoint still speaks plain
-/// HTTP CONNECT, hence the http:// scheme — with SOCKS as the fallback.
-#[cfg(target_os = "macos")]
-fn system_proxy_url() -> Option<String> {
-    let out = quiet_command("scutil").arg("--proxy").output().ok()?;
-    parse_scutil_proxy(&String::from_utf8_lossy(&out.stdout))
-}
-
-/// Parse `scutil --proxy` output (`  Key : value` lines) into a proxy URL.
-/// Compiled where it is reachable — macOS — plus tests everywhere, so the
-/// parser stays covered on any host without warning as dead code on the ones
-/// that never call it. (Same shape as `strip_windows_verbatim`.)
-#[cfg(any(target_os = "macos", test))]
-fn parse_scutil_proxy(text: &str) -> Option<String> {
-    let get = |key: &str| -> Option<String> {
-        let prefix = format!("{key} : ");
-        text.lines()
-            .find_map(|l| l.trim().strip_prefix(prefix.as_str()).map(|v| v.trim().to_string()))
-    };
-    let enabled = |key: &str| get(key).as_deref() == Some("1");
-    for (en, host, port, scheme) in [
-        ("HTTPSEnable", "HTTPSProxy", "HTTPSPort", "http"),
-        ("HTTPEnable", "HTTPProxy", "HTTPPort", "http"),
-        ("SOCKSEnable", "SOCKSProxy", "SOCKSPort", "socks5"),
-    ] {
-        if enabled(en) {
-            if let (Some(h), Some(p)) = (get(host), get(port)) {
-                return Some(format!("{scheme}://{h}:{p}"));
-            }
-        }
-    }
-    None
-}
-
-#[cfg(not(target_os = "macos"))]
-fn system_proxy_url() -> Option<String> {
-    // Windows/Linux: terminal-launched apps inherit the user's proxy env
-    // (covered by the passthrough above); no OS store is read here yet.
-    None
-}
-
 /// One-time upgrade cleanup for connector configs created before the app gave
 /// the agent browser its own namespace: close the daemon started under the old,
 /// shared one. Spawned and not waited on — a stuck helper must never hold up a
@@ -1382,6 +1480,8 @@ fn spawn_sidecar(env: &Env, port: u16, generation: u64) -> Result<Child, String>
     // Host presentation tools are global to the app-owned OpenCode profile and
     // available in every session workspace.
     deploy_workbench_tools(env);
+    // …and the computer-use host layer one of them imports.
+    deploy_computer_runtime(env);
     // The reviewer agent and its commands, same profile, same refresh-on-start.
     deploy_profile_prompts(env);
     // A config neither side can read stops the runtime from starting at all, so
@@ -1390,6 +1490,39 @@ fn spawn_sidecar(env: &Env, port: u16, generation: u64) -> Result<Child, String>
     // every time (#118). The file is moved aside, never deleted.
     quarantine_unreadable_configs(env);
     let cfg_file = effective_config_file(env)?;
+    // OpenCode 1.18.32 renamed Kimi's coding-plan provider. Migrate only our
+    // private auth store, keeping the original key and any newer destination.
+    // Copy credentials first so a failed write cannot leave migrated model
+    // references pointing at credentials that were never persisted.
+    let existing = std::fs::read_to_string(&cfg_file).unwrap_or_default();
+    let migrated_config = crate::opencode_config::migrate_kimi_config(&existing);
+    let auth_file = data.join("opencode").join("auth.json");
+    match std::fs::read_to_string(&auth_file) {
+        Ok(existing) => {
+            if migrated_config.is_some()
+                && !serde_json::from_str::<serde_json::Value>(&existing)
+                    .is_ok_and(|auth| auth.is_object())
+            {
+                return Err(
+                    "Cannot migrate Kimi provider: app-private auth.json is not a valid JSON object; repair it and restart. Auth and config files were left unchanged."
+                        .to_string(),
+                );
+            }
+            if let Some(migrated) = crate::opencode_config::migrate_kimi_auth(&existing) {
+                write_atomic(&auth_file, &migrated)?;
+                tighten_private(&auth_file);
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!(
+                "Cannot read app-private auth.json for Kimi migration: {error}. Check file permissions and restart; config references were left unchanged."
+            ));
+        }
+    }
+    if let Some(migrated) = migrated_config {
+        write_atomic(&cfg_file, &migrated)?;
+    }
     // Safety default (AGENTS.md non-negotiable): on first run, seed the
     // "approve" permission mode so dangerous shell commands prompt for
     // approval. A mode the user chose (approve or full) is never overridden.
@@ -1409,6 +1542,16 @@ fn spawn_sidecar(env: &Env, port: u16, generation: u64) -> Result<Child, String>
     // after these installs picked their mode.
     let existing = std::fs::read_to_string(&cfg_file).unwrap_or_default();
     if let Some(migrated) = crate::opencode_config::migrate_browser_permission(&existing) {
+        write_atomic(&cfg_file, &migrated)?;
+    }
+    // And again for computer use, which arrived later still.
+    let existing = std::fs::read_to_string(&cfg_file).unwrap_or_default();
+    if let Some(migrated) = crate::opencode_config::migrate_computer_permission(&existing) {
+        write_atomic(&cfg_file, &migrated)?;
+    }
+    // Same shape once more for bash tokens added after a mode was chosen.
+    let existing = std::fs::read_to_string(&cfg_file).unwrap_or_default();
+    if let Some(migrated) = crate::opencode_config::migrate_dangerous_bash(&existing) {
         write_atomic(&cfg_file, &migrated)?;
     }
     // Rename the legacy browser MCP id, then hide the incompatible user skill
@@ -1538,12 +1681,20 @@ fn spawn_sidecar(env: &Env, port: u16, generation: u64) -> Result<Child, String>
     if let Some(ssh_config) = ssh_config_path(env) {
         cmd.env("OPENSCIENCE_SSH_CONFIG", ssh_config.to_string_lossy().to_string());
     }
+    // Where the `computer` tool finds the native provider for this platform.
+    // Unset — a build without them — leaves computer use simply unavailable,
+    // which the tool reports as such rather than failing obscurely.
+    if let Some(dir) = computer_use_provider_dir(env) {
+        cmd.env("OPENSCIENCE_COMPUTER_USE_DIR", dir.to_string_lossy().to_string());
+    }
     // Apply the network-proxy setting so provider logins and API calls work
     // where direct connections are blocked (see resolve_proxy_env).
     let (proxy_mode, proxy_url) = read_proxy_setting(env);
     for (k, v) in resolve_proxy_env(&proxy_mode, &proxy_url) {
         cmd.env(k, v);
     }
+    *SIDECAR_PROXY.lock().unwrap_or_else(|e| e.into_inner()) =
+        Some(effective_proxy(&proxy_mode, &proxy_url).unwrap_or_default());
 
     let mut child = spawn_tied_to_our_lifetime(cmd)
         .map_err(|e| format!("failed to spawn opencode: {e}"))?;
@@ -1891,7 +2042,12 @@ pub fn set_workspace(
 
     // Follow the active folder with the snapshot watcher so out-of-app edits
     // (external editor, detached process) in the new workspace are captured too.
-    crate::git_snapshot::watch_workspace(&canon);
+    // The NATIVE form, not `canon`: on Windows the watcher was the one caller
+    // still handed the `\\?\` verbatim path, which it then passes to git as a
+    // working directory. Every other consumer was given the plain form by #76;
+    // this one was missed, so snapshots were the last thing still fed a shape
+    // nothing else in the app produces.
+    crate::git_snapshot::watch_workspace(std::path::Path::new(&native));
 
     // No sidecar restart: OpenCode serves every folder from one process via
     // per-directory instances, and the frontend reconnects its event stream
@@ -2025,10 +2181,11 @@ pub fn kill_child(state: &RuntimeState) {
 #[cfg(test)]
 mod tests {
     use super::{
-        auth_has_provider, dependency_pins, deploy_goal_plugin_dependencies, parse_scutil_proxy,
+        auth_has_provider, dependency_pins, deploy_goal_plugin_dependencies,
         package_dependency_version, OPENCODE_PLUGIN_PACKAGE,
-        ensure_base_layout, prune_stale_skills, random_hex, remove_key_from_config,
-        resolve_proxy_env, skill_name_from_markdown, sync_skill_pack, validate_proxy_url,
+        base_workspace_dir, ensure_base_layout, prune_stale_skills, random_hex, remove_key_from_config,
+        resolve_proxy_env, set_workspace_base, skill_name_from_markdown, sync_skill_pack,
+        validate_proxy_url, workspace_dir,
         workspace_skill_dirs,
     };
     use std::fs;
@@ -2378,9 +2535,14 @@ mod tests {
             .collect();
         assert_eq!(aside.len(), 1, "{aside:?}");
         assert_eq!(fs::read_to_string(&aside[0]).unwrap(), broken);
+        // Compare as paths, not strings: `aside` was built from the mixed
+        // separator spelling above (`runtime/xdg-config/…`), while the notice
+        // records the production code's native join spelling. On Windows the
+        // two strings differ but name the same file — `Path` equality compares
+        // by component, so `/` and `\` no longer matter.
         assert_eq!(
-            super::take_config_quarantine_notice(&env).as_deref(),
-            Some(aside[0].to_string_lossy().as_ref()),
+            super::take_config_quarantine_notice(&env).map(std::path::PathBuf::from),
+            Some(aside[0].clone()),
             "the user is told, with the path"
         );
 
@@ -2511,10 +2673,55 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    /// The base layout belongs to the BASE folder only. `workspace_dir` returns
+    /// whatever folder the user opened — a session folder, a project, a git
+    /// checkout of their own — and planting the two collections in each of them
+    /// wrote empty `projects/` and `sessions/` directories into the user's own
+    /// repositories. Worse than untidy: the pair it planted was always empty, so
+    /// the file browser showed "this folder is empty" for collections that were
+    /// in fact full, somewhere else.
+    #[test]
+    fn opening_a_folder_does_not_plant_collections_in_it() {
+        let (env, dir) = temp_env("active-ws");
+        let opened = dir.join("some-git-checkout");
+        let base = dir.join("base");
+        for d in [&opened, &base] {
+            fs::create_dir_all(d).unwrap();
+        }
+        fs::create_dir_all(dir.join("runtime")).unwrap();
+        // The base is pointed somewhere temporary first: without that record this
+        // would fall through to the real `~/Documents/OpenScience`.
+        set_workspace_base(&env, base.to_string_lossy().to_string()).unwrap();
+        fs::write(
+            dir.join("runtime/active-workspace.txt"),
+            opened.to_string_lossy().as_bytes(),
+        )
+        .unwrap();
+
+        assert_eq!(workspace_dir(&env).unwrap(), opened);
+        assert!(!opened.join("projects").exists(), "the user's folder was written into");
+        assert!(!opened.join("sessions").exists(), "the user's folder was written into");
+
+        // The base folder does have them — that is where the collections live,
+        // and it repairs them itself if one goes missing.
+        assert!(base.join("projects").is_dir());
+        fs::remove_dir(base.join("projects")).unwrap();
+        // `set_workspace_base` stores the CANONICAL path, which on macOS is the
+        // /private form of a temp dir — so compare what both sides resolve to.
+        assert_eq!(
+            base_workspace_dir(&env).unwrap().canonicalize().unwrap(),
+            base.canonicalize().unwrap()
+        );
+        assert!(base.join("projects").is_dir());
+        assert!(base.join("sessions").is_dir());
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn proxy_url_validation() {
         assert!(validate_proxy_url("http://127.0.0.1:7890").is_ok());
-        assert!(validate_proxy_url("socks5://10.0.0.2:1080").is_ok());
+        assert!(validate_proxy_url("socks5://10.0.0.2:1080").is_err()); // Bun cannot use it
         assert!(validate_proxy_url("http://[::1]:8080").is_ok());
         assert!(validate_proxy_url("127.0.0.1:7890").is_err()); // no scheme
         assert!(validate_proxy_url("http://host").is_err()); // no port
@@ -2531,18 +2738,6 @@ mod tests {
         let custom = resolve_proxy_env("custom", "http://127.0.0.1:7890");
         assert!(custom.iter().any(|(k, v)| *k == "HTTPS_PROXY" && v == "http://127.0.0.1:7890"));
         assert!(custom.iter().any(|(k, v)| *k == "NO_PROXY" && v.contains("127.0.0.1")));
-    }
-
-    #[test]
-    fn scutil_proxy_parses_and_prefers_https() {
-        // Real `scutil --proxy` shape (indented `Key : value` lines).
-        let all = "<dictionary> {\n  HTTPEnable : 1\n  HTTPPort : 1087\n  HTTPProxy : 127.0.0.1\n  HTTPSEnable : 1\n  HTTPSPort : 1087\n  HTTPSProxy : 127.0.0.1\n  SOCKSEnable : 1\n  SOCKSPort : 1087\n  SOCKSProxy : 127.0.0.1\n}";
-        assert_eq!(parse_scutil_proxy(all).as_deref(), Some("http://127.0.0.1:1087"));
-        let socks_only = "  SOCKSEnable : 1\n  SOCKSPort : 7890\n  SOCKSProxy : 10.0.0.2\n";
-        assert_eq!(parse_scutil_proxy(socks_only).as_deref(), Some("socks5://10.0.0.2:7890"));
-        let disabled = "  HTTPEnable : 0\n  HTTPPort : 1087\n  HTTPProxy : 127.0.0.1\n";
-        assert_eq!(parse_scutil_proxy(disabled), None);
-        assert_eq!(parse_scutil_proxy(""), None);
     }
 
     #[test]
@@ -2802,6 +2997,103 @@ mod tests {
         assert_eq!(
             fs::read_to_string(dst.join("node_modules/user-plugin/keep.txt")).unwrap(),
             "keep"
+        );
+        fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    /// The profile's own `package.json` is read when the runtime resolves EVERY
+    /// plugin the config names by path in that directory, so a `main` in it
+    /// replaces the file each of them names — the guards then never register and
+    /// say nothing (#151). The bundled package.json carries exactly such a
+    /// `main`, and a fresh profile gets it verbatim.
+    #[test]
+    fn a_fresh_profile_drops_the_entry_point_that_hijacks_sibling_plugins() {
+        let tmp = std::env::temp_dir().join(format!("goal-deps-hijack-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let src = tmp.join("src");
+        let dst = tmp.join("dst");
+        write(&src.join(".opencode-plugin-version"), "1.18.32\n");
+        // The shape the fetch script ships, plus an `exports` — the runtime
+        // consults it before `main`, so both must go.
+        write(
+            &src.join("package.json"),
+            r#"{"name":"goal-plugin","version":"1.0.0","main":"goal-plugin.server.js","exports":"./goal-plugin.server.js","dependencies":{"@opencode-ai/plugin":"^1.18.32"}}"#,
+        );
+        write(&src.join("package-lock.json"), "{}");
+        write(
+            &src.join("node_modules/@opencode-ai/plugin/package.json"),
+            r#"{"name":"@opencode-ai/plugin","version":"1.18.32"}"#,
+        );
+
+        deploy_goal_plugin_dependencies(&src, &dst).unwrap();
+
+        let deployed: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dst.join("package.json")).unwrap()).unwrap();
+        assert!(
+            deployed.get("main").is_none(),
+            "a `main` here makes the runtime load this plugin for browser-guard.ts and \
+             history-guard.ts too, so their hooks never register: {deployed}"
+        );
+        assert!(deployed.get("exports").is_none(), "{deployed}");
+        // The dependency line is the reason the file exists; it must survive.
+        assert_eq!(
+            deployed
+                .get("dependencies")
+                .and_then(|d| d.get(OPENCODE_PLUGIN_PACKAGE))
+                .and_then(serde_json::Value::as_str),
+            Some("^1.18.32"),
+        );
+        fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    /// The affected install is the one that is otherwise up to date: it has the
+    /// dependency, the lockfile and the marker, so `deploy_goal_plugin_dependencies`
+    /// takes its "already deployed" early return — and would never repair the
+    /// `main` an earlier release put there.
+    #[test]
+    fn an_up_to_date_profile_is_still_cleaned_of_the_hijacking_entry_point() {
+        let tmp = std::env::temp_dir().join(format!("goal-deps-repair-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let src = tmp.join("src");
+        let dst = tmp.join("dst");
+        write(&src.join(".opencode-plugin-version"), "1.18.32\n");
+        write(
+            &src.join("package.json"),
+            r#"{"name":"goal-plugin","main":"goal-plugin.server.js","dependencies":{"@opencode-ai/plugin":"^1.18.32"}}"#,
+        );
+        // A profile that is fully deployed already — except for `main`.
+        write(
+            &dst.join("package.json"),
+            r#"{"main":"goal-plugin.server.js","dependencies":{"@opencode-ai/plugin":"^1.18.32","user-plugin":"2.0.0"},"userKey":true}"#,
+        );
+        write(
+            &dst.join("package-lock.json"),
+            r#"{"lockfileVersion":3,"packages":{"":{"dependencies":{"@opencode-ai/plugin":"^1.18.32","user-plugin":"2.0.0"}}}}"#,
+        );
+        write(
+            &dst.join("node_modules/@opencode-ai/plugin/package.json"),
+            r#"{"name":"@opencode-ai/plugin","version":"1.18.32"}"#,
+        );
+        write(&dst.join(".opencode-plugin-version"), "1.18.32\n");
+
+        deploy_goal_plugin_dependencies(&src, &dst).unwrap();
+
+        let repaired: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dst.join("package.json")).unwrap()).unwrap();
+        assert!(repaired.get("main").is_none(), "not repaired: {repaired}");
+        // ...and only our entry point was touched.
+        assert_eq!(
+            repaired
+                .get("dependencies")
+                .and_then(|d| d.get("user-plugin"))
+                .and_then(serde_json::Value::as_str),
+            Some("2.0.0"),
+            "a user's own plugin dependency was dropped: {repaired}"
+        );
+        assert_eq!(
+            repaired.get("userKey").and_then(serde_json::Value::as_bool),
+            Some(true),
+            "a user's own key was dropped: {repaired}"
         );
         fs::remove_dir_all(&tmp).unwrap();
     }
@@ -3259,7 +3551,18 @@ pub fn set_agent_variant(
 pub fn get_proxy_setting(env: &Env) -> Result<serde_json::Value, String> {
     let (mode, url) = read_proxy_setting(env);
     let effective = effective_proxy(&mode, &url);
-    Ok(serde_json::json!({ "mode": mode, "url": url, "effective": effective }))
+    let started_with = SIDECAR_PROXY
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let restart_needed =
+        started_with.is_some_and(|applied| applied != effective.clone().unwrap_or_default());
+    Ok(serde_json::json!({
+        "mode": mode,
+        "url": url,
+        "effective": effective,
+        "restartNeeded": restart_needed,
+    }))
 }
 
 /// Persist the proxy setting ("system" | "custom" | "none", url for custom)
