@@ -16,9 +16,7 @@ tauri-build = { version = "2", features = [] }
 # The server core: workspace, sidecar, gateway — everything that also runs
 # under `osd server`, where there is no window and no Tauri.
 osd-core.workspace = true
-# macos-private-api: transparent webview background for the vibrancy sidebar
-# (tauri.macos.conf.json); no-op on other platforms.
-tauri = { version = "2", features = ["macos-private-api"] }
+tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
 tauri-plugin-single-instance = "2"
 serde.workspace = true
@@ -42,6 +40,8 @@ libc = "0.2"
 
 # Already in the tree via tao — used to re-pin the traffic lights (src/macos.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
+# Transparent webview background for the macOS vibrancy sidebar.
+tauri = { version = "2", features = ["macos-private-api"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = [
     "std",
     "NSButton",
