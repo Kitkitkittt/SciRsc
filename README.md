@@ -186,12 +186,13 @@ office/document skills below.
 | Runtime | Bundled OpenCode sidecar, auto-started by the app, isolated from the user's own OpenCode config/data. |
 | Projects | Named project workspaces that group their sessions; import an existing folder in place (never copied) or adopt one already inside the workspace; move an existing session into a project. |
 | Sessions | Multi-session chat/history, dated workspace folders, searchable history with archive/restore/export, `@` file and `#` conversation references, `/` commands, and `!` shell mode. |
-| Layout | N-ary split-pane tiling with drag-to-dock, independent Screens, per-pane model and reasoning effort, and cross-screen pane drag. |
+| Layout | N-ary split-pane tiling with drag-to-dock, project-scoped Screens, per-pane model and reasoning effort, and cross-screen pane drag. |
 | Agent modes | `/plan` for plan-then-execute, `/goal` for objective and acceptance criteria, live subagent status in its own panel, and Stop that reflects the runtime's real server state. |
 | Memory | Global and per-project memory layers, switchable, plus automatic context compaction as a conversation approaches the model's window. |
 | Remote compute | Register machines from your `~/.ssh/config`, probe them, and submit, track, or cancel jobs from the app. |
 | Appearance | Light, Warm, and Dark themes with per-theme accents, and UI zoom. |
 | Files | Global and per-session file browsing, context menu actions, external open/reveal, copy path, and local preview server. |
+| Terminal | Integrated PTY panes with restored working directories and exported environment changes; detected Claude Code and Codex sessions can resume when reopened. |
 | Headless & CLI | `osd server` runs the workbench with no window — same workspace, same runtime, same web UI, served from one self-contained directory — and `osd` drives it (or a running desktop app) from a terminal: sessions, projects, runs, files, approvals, `--wait`, `--json`. |
 | Remote access | Token-authenticated gateway that serves the real UI to a CLI, a LAN web browser, or your phone (loopback by default, LAN opt-in); read-only vs full access modes; copy a link with the token embedded to connect in one tap. API keys never cross the wire. |
 | Editor interop (ACP) | Speaks the Agent Client Protocol in both directions: run any ACP agent (Codex, Gemini CLI, Claude Code, …) as the runtime behind the ordinary UI, with its own model and reasoning selectors, history replay, and this app's MCP connectors; or let an external editor (Zed, JetBrains, Neovim, …) drive Open Science, reusing the gateway token. |
@@ -215,7 +216,11 @@ git history:
   `docx`, `pdf`, `pptx`, and `xlsx`.
 - First-party core skills in `runtime/skills/core/`:
   `traceability-review`, `stats-integrity`, `domain-check`, `large-file`,
-  `publication-figures`, `remote-compute`, and `modal-run`.
+  `publication-figures`, `remote-compute`, `modal-run`, and `computer-use`.
+
+SciRsc applies its tracked publication-figure instructions to the fetched report skills.
+For the source-to-build-resource-to-installed-profile refresh sequence, see
+[`runtime/skills/README.md`](./runtime/skills/README.md#refreshing-local-skill-content).
 
 One-click science MCP connectors currently include:
 
@@ -458,6 +463,7 @@ pnpm --filter @ai4s/desktop tauri build --no-bundle
 # Or build platform installers (stages computer-use resources via the bundle hook).
 pnpm --filter @ai4s/desktop tauri build
 ```
+
 `./launch.sh` is the local Linux launcher. It runs the existing
 `target/release/ai4s-workbench` executable and forwards arguments; it does **not** rebuild
 the app. Re-run the Tauri release build after source changes. The retained executable
@@ -466,7 +472,6 @@ intentional. `pnpm build` alone builds the frontend, not this desktop executable
 
 The fetch scripts require network access and download pinned third-party resources.
 On macOS, staging the computer-use helper also requires the Swift toolchain.
-
 
 Useful checks:
 
@@ -507,7 +512,8 @@ pnpm lint
 
 ## Status
 
-SciRsc tracks tagged Open Science Desktop `v0.6.0` and remains research tooling in active development. The most reliable current
+SciRsc tracks tagged Open Science Desktop `v0.6.0` and remains research tooling in
+active development. The most reliable current
 implementation log is [`PROGRESS.md`](./PROGRESS.md). Product and architecture notes
 live in [`docs/PRD.md`](./docs/PRD.md) and
 [`docs/TECHNICAL_DESIGN.md`](./docs/TECHNICAL_DESIGN.md), but those documents include

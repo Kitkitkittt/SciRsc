@@ -21,7 +21,7 @@ Open Science Desktop `v0.5.1` is the foundation. It already provides the request
 
 Sources: [Open Science Desktop README](https://github.com/ai4s-research/open-science/blob/v0.5.1/README.md), [technical design](https://github.com/ai4s-research/open-science/blob/v0.5.1/docs/TECHNICAL_DESIGN.md), and [tool integration guide](https://github.com/ai4s-research/open-science/blob/v0.5.1/docs/CONNECT_YOUR_TOOLS.md).
 
-The application baseline is tag `v0.5.1`; SciRsc development continues on `main`. Other projects remain external because copying overlapping application code would make updates, licensing, dependency isolation, and provenance harder.
+The original adoption baseline was tag `v0.5.1`; the current maintenance baseline is `v0.6.0` (`f879a9b3b0bf93794c23370363002979e6fa89e3`, released 2026-10-04). See [upstream maintenance](../agents/upstream.md) for the update procedure. The original source assessment below remains dated 2026-09-03; it is not a new audit of those external projects. Other projects remain external because copying overlapping application code would make updates, licensing, dependency isolation, and provenance harder.
 
 ## Source assessment
 

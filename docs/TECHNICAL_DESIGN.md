@@ -153,19 +153,31 @@ private directory permissions, not a claim of operating-system keychain storage.
 The sidecar restarts when a configuration change requires it. The gateway is a separate
 bearer-token boundary; only that listener can be opted into LAN access.
 
+On startup, the app-private profile migrates OpenCode's renamed Kimi coding-plan
+provider from `kimi-for-coding` to `kimi-code-plan-cn`. Legacy credential/provider
+entries are retained; an existing destination entry is never overwritten. Only
+schema-defined model/provider references are rewritten, not prompt text, URLs, or
+API keys, and the user's global CLI credential store is not edited.
+
 ## 6. Skills & MCP
 
 ### 6.1 Skill layering
 
+Current bundled skill sources and SciRsc's report-skill patch are documented in
+`runtime/skills/README.md`:
+
 ```text
-skills/
-  core/      # reproducible-research, literature-review, figure-provenance,
-             # citation-reviewer, paper-to-report
-  external/  # K-Dense scientific-agent-skills
-  user/      # custom skills
+runtime/skills/
+  core/      # first-party scientific/review, remote-compute, and computer-use skills
+  external/  # pinned ai4s, office/document, and browser packs fetched for builds
+  user/      # notes; user-installed skills live in workspace .opencode/skills/
 ```
 
-### 6.2 v1 built-in skills
+Current first-party skills include `traceability-review`, `stats-integrity`,
+`domain-check`, `large-file`, `publication-figures`, `remote-compute`, `modal-run`, and
+`computer-use`; fetched packs provide exploration, survey, experiment, and writing flows.
+
+### 6.2 Proposed v1 built-in skills (historical)
 
 | Skill | Purpose |
 | --- | --- |
@@ -180,16 +192,17 @@ skills/
 
 `K-Dense-AI/scientific-agent-skills` (large set; compatible with Cursor, Claude Code,
 Codex, OpenCode) can be added later. Do **not** enable all ~148 skills by default: use
-curated install, enable by domain, and show license, dependencies, and risk. (Curated
-third-party install is a later feature; today the Skills page lists the real skills
-OpenCode has loaded — built-in + project `.opencode/skill/` + user config.)
+curated install, enable by domain, and show license, dependencies, and risk. The current
+Skills page lists skills and agents loaded by OpenCode from the app-managed profile
+and workspace; bulk third-party installation remains a separate design concern.
 
 ### 6.4 MCP servers
 
-First batch: `filesystem` (project files), `paper-search-mcp` (literature), `BioMCP`
-(biomedical databases), `Zotero MCP` (library), `GitHub MCP` (repos/issues/releases),
-`local runtime MCP` (execution status). v1 ships filesystem + paper search first;
-BioMCP and Zotero follow.
+Current one-click connectors include literature/preprint search, biomedical databases,
+Materials Project, FRED, space weather, Open-Meteo, and USGS water data. Settings also
+accepts custom local or remote MCP servers. See `docs/CONNECT_YOUR_TOOLS.md`; the
+initial filesystem/paper-search/BioMCP/Zotero sequence was a rollout plan, not the
+current connector inventory.
 
 ## 7. Execution layer
 
