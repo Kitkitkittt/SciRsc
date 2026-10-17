@@ -1,8 +1,15 @@
 import "@testing-library/jest-dom/vitest";
+import { transferableAbortController } from "node:util";
 
 // DOM stubs — only in a browser-like (jsdom) environment. The node-env tests
 // (e.g. the OpenCode integration test) skip these.
 if (typeof window !== "undefined") {
+  // Node's Request rejects jsdom's AbortSignal. Recover the native constructors
+  // together so React Router requests and cancellation stay in the same realm.
+  const nativeAbortController = transferableAbortController();
+  globalThis.AbortController = nativeAbortController.constructor as typeof AbortController;
+  globalThis.AbortSignal = nativeAbortController.signal.constructor as typeof AbortSignal;
+
   if (!("ResizeObserver" in globalThis)) {
     (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
       observe() {}
