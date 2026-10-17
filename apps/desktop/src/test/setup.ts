@@ -1,8 +1,15 @@
 import "@testing-library/jest-dom/vitest";
+import { transferableAbortController } from "node:util";
 
 // DOM stubs — only in a browser-like (jsdom) environment. The node-env tests
 // (e.g. the OpenCode integration test) skip these.
 if (typeof window !== "undefined") {
+  // Node's Request rejects jsdom's AbortSignal. Recover the native constructors
+  // together so React Router requests and cancellation stay in the same realm.
+  const nativeAbortController = transferableAbortController();
+  globalThis.AbortController = nativeAbortController.constructor as typeof AbortController;
+  globalThis.AbortSignal = nativeAbortController.signal.constructor as typeof AbortSignal;
+
   if (!("ResizeObserver" in globalThis)) {
     (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
       observe() {}
@@ -12,6 +19,12 @@ if (typeof window !== "undefined") {
   }
   if (typeof Element !== "undefined" && !Element.prototype.scrollIntoView) {
     Element.prototype.scrollIntoView = () => {};
+  }
+  // jsdom has no hit testing. The pane drag controller asks what is under the
+  // pointer on every move; without this it throws mid-drag and the failure
+  // surfaces as an unhandled error rather than as a test result.
+  if (typeof document.elementFromPoint !== "function") {
+    document.elementFromPoint = () => null;
   }
   if (!window.matchMedia) {
     window.matchMedia = ((query: string) => ({
@@ -56,6 +69,20 @@ if (typeof window !== "undefined") {
       configurable: true,
       writable: true,
     });
+  }
+}
+
+// jsdom implements no layout, so `Range` has no measurement methods — and
+// CodeMirror measures text through them on every view update, which otherwise
+// throws before a single assertion runs. Empty rectangles are the honest answer
+// in a headless DOM: there is no geometry to report.
+if (typeof Range !== "undefined") {
+  if (!Range.prototype.getClientRects) {
+    Range.prototype.getClientRects = () =>
+      Object.assign([] as unknown as DOMRectList, { item: () => null });
+  }
+  if (!Range.prototype.getBoundingClientRect) {
+    Range.prototype.getBoundingClientRect = () => new DOMRect();
   }
 }
 

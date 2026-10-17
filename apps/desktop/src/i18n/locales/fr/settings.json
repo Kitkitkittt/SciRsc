@@ -9,6 +9,7 @@
     "compute": "Calcul",
     "privacy": "Confidentialité",
     "browser": "Navigateur",
+    "computer": "Contrôle de l'ordinateur",
     "remote": "Accès distant",
     "memory": "Mémoire",
     "desktopOnly": "Cette section est disponible dans l'application de bureau."
@@ -19,7 +20,8 @@
     "theme": {
       "light": "Clair",
       "warm": "Chaud",
-      "dark": "Sombre"
+      "dark": "Sombre",
+      "system": "Système"
     },
     "zoom": {
       "label": "Zoom",
@@ -27,6 +29,13 @@
       "in": "Zoom avant",
       "out": "Zoom arrière",
       "reset": "Réinitialiser"
+    },
+    "fontSize": {
+      "title": "Taille du texte",
+      "description": "S’applique uniquement au contenu de la conversation",
+      "unit": "px",
+      "increase": "Agrandir le texte",
+      "decrease": "Réduire le texte"
     }
   },
   "language": {
@@ -47,9 +56,12 @@
     "proxySystem": "Suivre le système",
     "proxyCustom": "Personnalisé…",
     "proxyNone": "Direct (sans proxy)",
-    "proxyPlaceholder": "http://127.0.0.1:7890 / socks5://host:port",
+    "proxyPlaceholder": "http://127.0.0.1:7890",
     "proxyDirectHint": "Toutes les connexions du runtime de l’agent sont directes.",
     "proxyEffective": "Routage via {{url}}",
+    "proxySocksUnsupported": "{{url}} est un proxy SOCKS, que l'environnement de l'agent ne peut pas utiliser — toutes les connexions échoueraient. Utilisez plutôt le port HTTP de votre proxy (Clash : le port mixte, p. ex. http://127.0.0.1:7890).",
+    "proxyRestartNeeded": "Le proxy système a changé depuis le démarrage de l'environnement, qui utilise encore l'ancienne route. Appliquer redémarre l'environnement — les tâches en cours s'arrêteront.",
+    "proxyApply": "Appliquer",
     "proxyNoneDetected": "Aucun proxy système détecté — les connexions sont directes.",
     "mirrorTitle": "Miroirs de paquets",
     "mirrorPypi": "Index PyPI",
@@ -99,7 +111,7 @@
   },
   "model": {
     "title": "Modèle",
-    "hint": "Les fournisseurs ci-dessous proposent les modèles que vous pouvez choisir ici",
+    "hint": "Le modèle avec lequel démarre chaque nouvelle conversation. Les fournisseurs ci-dessous déterminent les choix.",
     "connectPrompt": "Connectez le runtime pour configurer les modèles.",
     "notSet": "Non défini — choisissez un modèle par défaut",
     "providersDivider": "Fournisseurs",
@@ -117,13 +129,14 @@
     "catalogUnavailable": "Le catalogue de modèles est actuellement indisponible.",
     "catalogLoading": "Chargement du catalogue de modèles…",
     "noModels": "Aucun modèle disponible.",
-    "manageProviders": "Gérer les fournisseurs",
     "emptyFavorites": "Les modèles favoris apparaissent ici.",
     "emptyRecent": "Les modèles sélectionnés avec succès apparaissent ici.",
     "noResults": "Aucun modèle ne correspond à « {{query}} ».",
     "clearSearch": "Effacer la recherche",
     "addFavorite": "Ajouter {{model}} aux favoris",
-    "removeFavorite": "Retirer {{model}} des favoris"
+    "removeFavorite": "Retirer {{model}} des favoris",
+    "change": "Changer",
+    "noProvidersHint": "Connectez un fournisseur ci-dessous."
   },
   "providers": {
     "title": "Fournisseurs",
@@ -149,29 +162,39 @@
     "pasteCode": "Collez le code depuis le navigateur",
     "customEndpoint": "Point de terminaison personnalisé",
     "customEndpointHint": "auto-hébergé · Ollama local · compatible OpenAI/Anthropic",
-    "customNamePlaceholder": "Nom — p. ex. Ollama, Ma passerelle DeepSeek",
+    "customNamePlaceholder": "p. ex. Ollama, ma passerelle DeepSeek",
     "openaiCompatible": "Compatible OpenAI",
     "anthropicCompatible": "Compatible Anthropic",
-    "customUrlPlaceholder": "URL de base — Ollama : http://127.0.0.1:11434/v1",
-    "customKeyPlaceholder": "Clé API — facultative, Ollama n'en a besoin d'aucune",
-    "customModelsPlaceholder": "Identifiants de modèles, séparés par des virgules",
-    "customContextPlaceholder": "Fenêtre de contexte — facultative, 128k par défaut",
+    "customUrlPlaceholder": "http://127.0.0.1:11434/v1",
+    "customKeyPlaceholder": "Facultatif — Ollama n'en a pas besoin",
+    "customModelsPlaceholder": "ids de modèle, séparés par des virgules",
+    "customContextPlaceholder": "Facultatif — 128k par défaut",
     "fetchModels": "Récupérer les modèles",
     "fetchingModels": "Récupération…",
     "noModelsFound": "Le point de terminaison n'a signalé aucun modèle.",
     "addEndpoint": "Ajouter un point de terminaison",
-    "importLogin": "Vous utilisez déjà le CLI OpenCode ? Importez sa connexion"
+    "importLogin": "Vous utilisez déjà le CLI OpenCode ? Importez sa connexion",
+    "addTitle": "Ajouter un fournisseur",
+    "fieldName": "Nom",
+    "fieldApiStyle": "Style d'API",
+    "fieldBaseUrl": "URL de base",
+    "fieldApiKey": "Clé d'API",
+    "fieldModels": "Modèles",
+    "fieldContext": "Fenêtre de contexte"
   },
   "mcp": {
     "title": "Serveurs MCP",
     "hint": "Outils supplémentaires pour l'agent (Model Context Protocol) — p. ex. un MCP Jupyter ou navigateur",
     "connectPrompt": "Connectez le runtime pour configurer les serveurs MCP.",
     "openSource": "open source",
+    "official": "officiel",
     "enterKeyFirstTitle": "Entrez d'abord la clé API",
     "settingUp": "Configuration en cours…",
     "enable": "Activer",
     "freeKeySuffix": "(clé gratuite)",
+    "requiredSuffix": "(obligatoire)",
     "getFreeKey": "Obtenir une clé gratuite",
+    "learnMore": "En savoir plus",
     "jupyterLabel": "Jupyter",
     "jupyterDescription": "permet à l'agent de piloter de véritables notebooks · environnement isolé avec numpy·pandas·matplotlib, ~500 Mo au premier lancement · une fois configuré, le bouton Exécuter de l'application l'utilise aussi, afin que vous et l'agent partagiez le même Python",
     "setUpAndEnable": "Configurer et activer",
@@ -225,6 +248,26 @@
     "hint": "Un agent relecteur en lecture seule qui audite le travail terminé : traçabilité, statistiques, unités et provenance.",
     "autoTitle": "Relire après chaque tour qui modifie des fichiers",
     "autoHint": "Exécute un tour de modèle supplémentaire en arrière-plan par modification. La conversation reste disponible ; les tours en lecture seule sont ignorés."
+  },
+  "sync": {
+    "title": "Synchronisation des conversations",
+    "hint": "Gardez vos conversations sur plusieurs de vos machines. Indiquez ici un dossier synchronisé par votre service cloud ; chaque conversation y est reflétée dans son propre fichier. Inactif tant qu'aucun dossier n'est choisi.",
+    "hintOn": "Activé. Chaque conversation est reflétée dans le dossier ci-dessous dans son propre fichier ; les autres machines pointant vers ce dossier les récupèrent. Les secrets ne sont jamais synchronisés.",
+    "folderTitle": "Dossier de synchronisation",
+    "folderNone": "Non défini — les conversations restent sur cette machine.",
+    "choose": "Choisir un dossier",
+    "change": "Modifier",
+    "stop": "Désactiver",
+    "nowTitle": "Synchroniser maintenant",
+    "nowHint": "S'exécute seul après chaque tour ; ceci sert quand vous le voulez tout de suite.",
+    "now": "Synchroniser",
+    "running": "Synchronisation…",
+    "done": "Synchronisé. {{imported}} reçues, {{exported}} envoyées.",
+    "folderSet": "Dossier de synchronisation défini.",
+    "stopped": "Synchronisation désactivée.",
+    "unusable": "Ce dossier est inutilisable",
+    "last": "Dernière synchronisation {{when}} — {{imported}} reçues, {{exported}} envoyées.",
+    "lastFailed": "Échec de la dernière synchronisation : {{error}}"
   },
   "python": {
     "title": "Noyau Python local",
@@ -379,7 +422,12 @@
     "connectPrompt": "Saisis le jeton d'accès de l'app de bureau → Réglages → Accès distant.",
     "acpTitle": "Éditeurs externes (ACP)",
     "acpHint": "Pilotez cet espace de travail depuis Zed, JetBrains, Neovim ou tout éditeur qui parle l'Agent Client Protocol. Collez cette entrée d'agent dans les réglages de l'éditeur ; elle se connecte via la passerelle ci-dessus, avec les droits du jeton.",
-    "acpNodeHint": "L'éditeur lance ce script avec Node 18+. Le jeton passe par l'environnement, pas par la ligne de commande."
+    "acpNodeHint": "L'éditeur lance ce script avec Node 18+. Le jeton passe par l'environnement, pas par la ligne de commande.",
+    "port": "Port de la passerelle",
+    "portHint": "Le port sur lequel la passerelle écoute. Par défaut 4098 ; définissez un port personnalisé pour les règles pare-feu ou les configurations multi-instances.",
+    "portInvalid": "Entrez un numéro de port valide (1-65535).",
+    "portApply": "Appliquer",
+    "portReset": "Réinitialiser par défaut"
   },
   "cli": {
     "title": "Commande de terminal (osd)",
@@ -416,13 +464,22 @@
     "title": "Modèle et effort par agent",
     "hint": "Faites tourner un relecteur ou un explorateur sur un modèle rapide pendant que l’agent principal raisonne sur un modèle puissant, et fixez l’intensité de réflexion de chacun.",
     "noModels": "Connectez un fournisseur pour choisir des modèles.",
-    "followDefault": "Modèle par défaut",
-    "followDefaultNamed": "Par défaut ({{model}})",
+    "followDefault": "Suivre le défaut",
     "modelFor": "Modèle pour {{agent}}",
     "defaultEffort": "Effort par défaut",
     "effortFor": "Effort de raisonnement pour {{agent}}",
     "retiredOption": "{{model}} — plus disponible",
-    "primaryHint": "build et plan exécutent les messages que vous envoyez. Le modèle défini ici s'applique, sauf si vous en choisissez un dans une conversation, qui l'emporte pour cette conversation uniquement."
+    "primaryHint": "build et plan exécutent les messages que vous envoyez. Le modèle défini ici s'applique, sauf si vous en choisissez un dans une conversation, qui l'emporte pour cette conversation uniquement.",
+    "group": {
+      "conversation": "Agents auxquels vous parlez",
+      "utility": "Utilisés par l'atelier lui-même"
+    },
+    "utilityHint": "Travail mécanique et court que le runtime effectue seul — un modèle rapide n'a ici que des avantages.",
+    "about": {
+      "title": "Nomme une session d'après son premier message.",
+      "summary": "Rédige le court récapitulatif d'une conversation.",
+      "compaction": "Réécrit une longue conversation pour tenir dans la fenêtre de contexte."
+    }
   },
   "ssh": {
     "title": "Se connecter à {{host}}",
@@ -434,5 +491,55 @@
     "reveal": "Afficher la saisie",
     "hide": "Masquer la saisie",
     "privacy": "Transmis uniquement au ssh de cette machine. Jamais stocké, journalisé, ni inscrit dans la provenance."
+  },
+  "notify": {
+    "title": "Notifications",
+    "hint": "Notifications système natives pour ce qui se termine pendant que vous ne regardez pas.",
+    "turnCompleteTitle": "Notifier quand un tour se termine",
+    "turnCompleteHint": "Envoie une notification système quand un tour se termine — terminé, échoué ou interrompu — pour ne pas avoir à surveiller le point d'état."
+  },
+  "stall": {
+    "channelA": "Contrôle du silence",
+    "channelB": "Contrôle des répétitions",
+    "custom": "Personnalisé…",
+    "enableHint": "Prévient seulement — vous décidez. Une tâche longue légitime (un entraînement, une sonde) n'est jamais interrompue.",
+    "enableTitle": "Surveiller les tours bloqués",
+    "hint": "Détecte un tour qui semble bloqué — silencieux trop longtemps, ou répétant sans cesse le même appel — et propose « Continuer d'attendre / Arrêter le tour ». Rien n'est jamais interrompu automatiquement.",
+    "hoursUnit": "h",
+    "repeatCustomHint": "Fois (2–100)",
+    "repeatLabel": "Prévenir quand le même appel se répète",
+    "repeatUnit": "fois",
+    "silenceCustomHint": "Minutes (1–1440)",
+    "silenceHint": "Pour être prévenu si l'agent reste silencieux. Si vous lancez souvent des tâches qui restent silencieuses plus d'une heure, augmentez cette valeur ou laissez ce contrôle désactivé.",
+    "silenceLabel": "Prévenir après un silence de",
+    "silenceUnit": "min",
+    "title": "Garde anti-blocage",
+    "webNote": "Dans le navigateur, l'avertissement n'apparaît que dans la conversation — pas de notification système."
+  },
+  "computer": {
+    "title": "Contrôle de l'ordinateur",
+    "hint": "Permet à l'agent de lire et de piloter les applications de cet ordinateur via l'API d'accessibilité du système. Il agit sur des éléments d'interface nommés plutôt que de deviner des pixels, et indique si chaque action a réellement pu être vérifiée. Une approbation vous est demandée à la première utilisation de chaque conversation.",
+    "checking": "Vérification…",
+    "state": "Disponibilité",
+    "ready": "Prêt. L'agent peut utiliser les applications de cet ordinateur lorsque vous le lui demandez.",
+    "unavailable": "Indisponible sur cette machine.",
+    "setup": "Ouvrir la configuration",
+    "recheck": "Revérifier",
+    "grant": "Autoriser…",
+    "granted": "Autorisé",
+    "opened": "Fenêtre des autorisations ouverte.",
+    "error": "Contrôle de l'ordinateur",
+    "accessibility": "Accessibilité",
+    "accessibilityHint": "Obligatoire. Permet à l'assistant de lire l'interface d'une application et d'agir dessus. L'autorisation est accordée à Open Science Computer Use — un assistant distinct — et non à tout l'atelier.",
+    "screenshots": "Enregistrement de l'écran",
+    "screenshotsHint": "Facultatif, et accordé à Open Science lui-même plutôt qu'à l'assistant — macOS attribue la capture d'écran à l'application à l'origine de la demande. Utile seulement lorsque l'agent doit regarder une fenêtre qu'il ne peut pas lire sous forme de texte, comme un graphique ou un canevas."
+  },
+  "userBrowser": {
+    "title": "Un navigateur que vous avez installé",
+    "hint": "Open Science a trouvé sur ce Mac un navigateur que son agent peut piloter depuis le shell. Rien à configurer : c'est ici pour que vous sachiez qu'il est atteignable.",
+    "name": "ego lite",
+    "reachable": "Installé et atteignable. L'agent demandera votre accord avant la première utilisation de chaque conversation.",
+    "notReachable": "Installé, mais son outil en ligne de commande est absent de cette machine, donc l'agent ne peut pas l'atteindre. Lancez la configuration propre à ego lite pour l'ajouter.",
+    "tradeoff": "Ce n'est pas le connecteur de navigateur ci-dessus. Celui-là pilote un navigateur distinct que cette application possède, avec un profil isolé. Celui-ci est votre navigateur de tous les jours et porte vos sessions réellement connectées — ce qui fait son intérêt, et pourquoi il demande d'abord. macOS uniquement."
   }
 }

@@ -42,14 +42,29 @@ export const ArtifactCard = memo(function ArtifactCard({
       role={onOpen ? "button" : undefined}
     >
       <span className="shrink-0 text-accent">{ICON[block.artifact]}</span>
-      <span className="truncate font-medium text-text">{block.filename}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium text-text">{block.filename}</span>
+        {block.path && block.path !== block.filename && (
+          <span
+            className="block truncate text-[11px] text-muted"
+            title={block.path}
+          >
+            {block.path}
+          </span>
+        )}
+      </span>
+      {/* One flex-1 in this row, and it is the filename above. There used to be
+          a second — a spacer `<div className="flex-1" />` right here — so the
+          free width was split between the name and the spacer, which parked the
+          kind badge and "via write" in the middle of the card with dead space on
+          both sides of them. Removing it lets the name take the slack, which
+          also means far less of a long path is truncated away. */}
       <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-xs text-muted ring-1 ring-border">
         {t(`artifact.kind.${block.artifact}`)}
       </span>
       <span className="shrink-0 truncate text-xs text-muted">
         {t("artifact.via", { tool: block.tool })}
       </span>
-      <div className="flex-1" />
       {onOpen && (
         <span className="flex shrink-0 items-center gap-1 rounded-input px-2 py-1 text-xs text-link">
           <SquareArrowOutUpRight size={13} /> {t("artifact.open")}

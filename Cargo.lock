@@ -31,9 +31,10 @@ dependencies = [
 
 [[package]]
 name = "ai4s-workbench"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "getrandom 0.4.3",
+ "libc",
  "objc2-app-kit",
  "opener",
  "osd-core",
@@ -2803,7 +2804,7 @@ dependencies = [
 
 [[package]]
 name = "osd-cli"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "libc",
  "osd-core",
@@ -2813,7 +2814,7 @@ dependencies = [
 
 [[package]]
 name = "osd-core"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "getrandom 0.4.3",
  "notify",
@@ -2821,6 +2822,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

@@ -2,14 +2,14 @@
 
 [![Open Science Desktop — Local-first AI research workbench](./docs/assets/banner.webp)](https://github.com/ai4s-research/open-science)
 
-# Open Science Desktop
+# SciRsc
 
 **Local-first, model-agnostic AI research workbench for macOS, Windows & Linux.**
 
-Formerly Open Science. An open-source desktop alternative to Claude Science and
-similar AI-for-science workbenches — built with Tauri, MCP, agent skills, and
-reproducible artifacts. It connects agents, notebooks, files, figures, reports,
-runs, and review into one auditable desktop workflow.
+An independent academic AI/data research dashboard based on **Open Science Desktop** —
+an open-source alternative to Claude Science and similar AI-for-science workbenches,
+built with Tauri, MCP, agent skills, and reproducible artifacts. It connects agents,
+notebooks, files, figures, reports, runs, and review into one auditable workflow.
 
 <p>
   <b>English</b> ·
@@ -39,11 +39,21 @@ runs, and review into one auditable desktop workflow.
 ---
 
 > **SciRsc repository note:** This personal academic AI/data research dashboard is
-> based on Open Science Desktop `v0.5.1`. Upstream provenance and update rules are
-> documented in [`docs/agents/upstream.md`](./docs/agents/upstream.md).
+> based on Open Science Desktop `v0.6.0` (`f879a9b3b0bf93794c23370363002979e6fa89e3`).
+> SciRsc's scientific instructions, manual approval defaults, and credential isolation
+> remain local customizations. Upstream provenance and update rules are documented in
+> [`docs/agents/upstream.md`](./docs/agents/upstream.md); the historical source audit is
+> retained in [`docs/research/2026-09-03-academic-ai-data-dashboard.md`](./docs/research/2026-09-03-academic-ai-data-dashboard.md).
 
 ## News
 
+- **2026-10-03 — Upstream v0.6.0.** Project-scoped Screens, integrated terminal restoration,
+  conversation turn navigation and trajectory inspection, and a refreshed workspace UI.
+  The bundled OpenCode runtime is pinned to **1.18.32**. SciRsc also migrates the renamed
+  Kimi coding-plan provider (`kimi-for-coding` to `kimi-code-plan-cn`) in its private
+  profile at startup: original credential/provider entries are retained, existing
+  destination entries are not overwritten, and model/provider references are updated.
+  The user's global OpenCode credential store is not edited.
 - **2026-08-18** — 🖥️ **Runs without a screen, and the terminal command comes with it.** `osd server` starts the whole workbench — workspace, agent runtime, and the *same* web UI — on a machine with no display, and `osd session send … --wait` drives it from a script or another agent. `osd` ships inside the desktop installer and puts itself on your PATH on first launch; on a server the archive needs nothing installed. Models, keys and approvals are all configurable from the terminal (`osd model`, `osd auth`, `osd approval`).
 - **2026-08-13** — 🔌 **Speaks the Agent Client Protocol, both directions.** Drive Codex, Gemini CLI, Claude Code, or any other ACP agent from inside this app — with its own models, history, and your MCP connectors — or drive Open Science itself from Zed, JetBrains, or Neovim. *(v0.4.0)*
 - **2026-08-01** — 🗂️ **Projects, memory, and full history.** Group sessions into named projects (import an existing repo *in place*, no copying), give the agent persistent global and project memory, and reach every past conversation through a searchable history with archive, restore, and export. *(v0.3.1)*
@@ -176,16 +186,18 @@ office/document skills below.
 | Runtime | Bundled OpenCode sidecar, auto-started by the app, isolated from the user's own OpenCode config/data. |
 | Projects | Named project workspaces that group their sessions; import an existing folder in place (never copied) or adopt one already inside the workspace; move an existing session into a project. |
 | Sessions | Multi-session chat/history, dated workspace folders, searchable history with archive/restore/export, `@` file and `#` conversation references, `/` commands, and `!` shell mode. |
-| Layout | N-ary split-pane tiling with drag-to-dock, independent Screens, per-pane model and reasoning effort, and cross-screen pane drag. |
+| Layout | N-ary split-pane tiling with drag-to-dock, project-scoped Screens, per-pane model and reasoning effort, and cross-screen pane drag. |
 | Agent modes | `/plan` for plan-then-execute, `/goal` for objective and acceptance criteria, live subagent status in its own panel, and Stop that reflects the runtime's real server state. |
 | Memory | Global and per-project memory layers, switchable, plus automatic context compaction as a conversation approaches the model's window. |
 | Remote compute | Register machines from your `~/.ssh/config`, probe them, and submit, track, or cancel jobs from the app. |
 | Appearance | Light, Warm, and Dark themes with per-theme accents, and UI zoom. |
 | Files | Global and per-session file browsing, context menu actions, external open/reveal, copy path, and local preview server. |
+| Terminal | Integrated PTY panes with restored working directories and exported environment changes; detected Claude Code and Codex sessions can resume when reopened. |
 | Headless & CLI | `osd server` runs the workbench with no window — same workspace, same runtime, same web UI, served from one self-contained directory — and `osd` drives it (or a running desktop app) from a terminal: sessions, projects, runs, files, approvals, `--wait`, `--json`. |
 | Remote access | Token-authenticated gateway that serves the real UI to a CLI, a LAN web browser, or your phone (loopback by default, LAN opt-in); read-only vs full access modes; copy a link with the token embedded to connect in one tap. API keys never cross the wire. |
 | Editor interop (ACP) | Speaks the Agent Client Protocol in both directions: run any ACP agent (Codex, Gemini CLI, Claude Code, …) as the runtime behind the ordinary UI, with its own model and reasoning selectors, history replay, and this app's MCP connectors; or let an external editor (Zed, JetBrains, Neovim, …) drive Open Science, reusing the gateway token. |
 | Browser control | The agent drives your own Chrome — profile and login state preserved — reading pages through the accessibility tree, or an isolated/private browser on demand. |
+| Computer use | The agent reads and drives apps on your own screen through the platform's accessibility API — native research software included — acting on named elements rather than guessing at pixels, and reporting whether each action could actually be verified. On macOS the Accessibility permission is held by a separate helper, not by the whole app; Screen Recording, which only optional screenshots need, is granted to Open Science itself because macOS attributes screen capture to the app that started the request. |
 | Notebooks | Real `.ipynb` files, Python and R notebook creation, local kernel execution, managed Jupyter environment via bundled `uv`, and an Open JupyterLab action. |
 | Runs | Append-only run logs, global SQLite run index, search/facets/pagination, local/remote surfaces, output links, logs, and reproduce prompts. |
 | Provenance | `.openscience/provenance.jsonl` tracks file versions and links produced artifacts back to the run or edit that created them. |
@@ -204,7 +216,11 @@ git history:
   `docx`, `pdf`, `pptx`, and `xlsx`.
 - First-party core skills in `runtime/skills/core/`:
   `traceability-review`, `stats-integrity`, `domain-check`, `large-file`,
-  `publication-figures`, `remote-compute`, and `modal-run`.
+  `publication-figures`, `remote-compute`, `modal-run`, and `computer-use`.
+
+SciRsc applies its tracked publication-figure instructions to the fetched report skills.
+For the source-to-build-resource-to-installed-profile refresh sequence, see
+[`runtime/skills/README.md`](./runtime/skills/README.md#refreshing-local-skill-content).
 
 One-click science MCP connectors currently include:
 
@@ -224,8 +240,10 @@ For a neutral positioning note, see
 
 ## Install
 
-Download the latest installer from the
+For **upstream Open Science Desktop** installers, use its
 [Releases page](https://github.com/ai4s-research/open-science/releases/latest).
+Those packages do not include SciRsc's local customizations; build this repository
+for the SciRsc version.
 
 - **macOS**: `.dmg` / `.app`, Apple Silicon and Intel, macOS 13 Ventura or later.
 - **Windows**: NSIS `.exe`, Windows 10/11 x64 — installs per user, no admin needed. A `.msi` is also published for IT-managed deployment; pick one format and stay on it.
@@ -301,6 +319,47 @@ Remote Access says which file it touched. Nothing else on your shell is changed.
 loudly if it produced no reply. `--json` prints the API's own response for
 scripts.
 
+### Concurrency and per-project setup
+
+Parallel work does not need a second server, or a second workspace: one
+`osd server` already runs many sessions at once. The gateway is
+thread-per-connection and nothing on the session path holds a global lock —
+what keeps one session's work out of another's is the folder each one is pinned
+to. `osd session new --project NAME` runs a session in a per-project folder of
+the workspace (created with `osd project new NAME`), and
+`osd session new --directory DIR` pins one to any other folder.
+
+Per-project MCP follows the folder too: an MCP server declared in
+`<folder>/.opencode/opencode.json` applies only to sessions working in that
+folder, and every session shares the same sidecar. One caching rule makes the
+ordering matter: a folder's opencode configuration is read once, the first time
+the sidecar uses that folder, and cached from then on. Write that configuration
+before any session is pointed at the folder: `osd session new --project NAME`
+(or `--directory DIR`) already reads and caches it, before a single turn has
+run, so "before the first turn" is already too late. Changing it afterwards
+takes effect only after a server restart, and until then the session runs,
+reports success, and used the previous configuration.
+
+None of this needs a second installation of the workbench.
+
+### Isolated state directories (--state-dir)
+
+`osd server --state-dir DIR` — or `OSD_STATE_DIR=DIR` — keeps everything one
+instance writes (session database, sidecar config, workspace record, logs)
+under DIR instead of the platform data directory. Nothing else changes: the
+default workspace still resolves to your real Documents folder, and the desktop
+app is unaffected, because it never goes through the headless override.
+
+This is NOT a way to get more concurrency — one server already runs many
+sessions at once (above). It is for genuinely separate installations on one
+machine: an unattended shard next to the desktop app, a benchmark cluster.
+
+Credentials stay per instance and are never copied: a fresh DIR has none, so
+the first server started there prints a note and the one-liner that adds
+one — `OSD_STATE_DIR=DIR osd auth set <provider> --key …` — or you export the
+provider's own variable (`ANTHROPIC_API_KEY=…`) before starting and the sidecar
+inherits it.
+
 ### Which model, and who approves what
 
 `osd model` shows the default, `osd model ls` lists what the runtime can
@@ -324,7 +383,10 @@ osd approval set full   # never ask — commands, deletions, installs, network
 
 `full` is a deliberate choice, not a default: the agent stays confined to the
 workspace, but nothing pauses for you. `osd approval set approve` puts every
-rule back.
+rule back. `osd approval set full` rewrites the runtime's own config on this
+machine, so it has to run on the machine itself — over SSH, not through
+`--gateway`: the gateway deliberately refuses config writes, and says so rather
+than silently doing nothing.
 
 ### As a service
 
@@ -370,27 +432,46 @@ workspace's file history through git snapshots but does not append to
 Prerequisites:
 
 - Node.js >= 20
-- pnpm 9
+- pnpm 9.4.0 (the repository's pinned package manager)
 - Rust toolchain
 - macOS, Windows, or Linux system dependencies required by Tauri
 
 ```bash
-git clone https://github.com/ai4s-research/open-science
-cd open-science
-pnpm install
+git clone https://github.com/Kitkitkittt/SciRsc.git
+cd SciRsc
+pnpm install --frozen-lockfile
 
 # Fetch pinned sidecars and bundled skills. These are git-ignored.
 bash scripts/dev/fetch-opencode.sh
 bash scripts/dev/fetch-uv.sh
 bash scripts/dev/fetch-skills.sh
+bash scripts/dev/fetch-agent-browser.sh
+bash scripts/dev/fetch-goal-plugin.sh
 
 # The osd terminal client is bundled too — it is ours, so it is built, not fetched.
 bash scripts/dev/build-osd-sidecar.sh $(rustc -vV | sed -n 's/host: //p')
 
-# Run in development or build installers.
+# Run the desktop app in development.
 pnpm --filter @ai4s/desktop tauri dev
+
+# Build the local desktop release executable without installers.
+# Stage native computer-use resources explicitly for the no-bundle build.
+node scripts/dev/build-computer-use.mjs
+pnpm --filter @ai4s/desktop tauri build --no-bundle
+./launch.sh
+
+# Or build platform installers (stages computer-use resources via the bundle hook).
 pnpm --filter @ai4s/desktop tauri build
 ```
+
+`./launch.sh` is the local Linux launcher. It runs the existing
+`target/release/ai4s-workbench` executable and forwards arguments; it does **not** rebuild
+the app. Re-run the Tauri release build after source changes. The retained executable
+and package identifiers (`ai4s-workbench`, `@ai4s/desktop`, `com.ai4s.workbench`) are
+intentional. `pnpm build` alone builds the frontend, not this desktop executable.
+
+The fetch scripts require network access and download pinned third-party resources.
+On macOS, staging the computer-use helper also requires the Swift toolchain.
 
 Useful checks:
 
@@ -431,7 +512,8 @@ pnpm lint
 
 ## Status
 
-The project is a working desktop MVP in active development. The most reliable current
+SciRsc tracks tagged Open Science Desktop `v0.6.0` and remains research tooling in
+active development. The most reliable current
 implementation log is [`PROGRESS.md`](./PROGRESS.md). Product and architecture notes
 live in [`docs/PRD.md`](./docs/PRD.md) and
 [`docs/TECHNICAL_DESIGN.md`](./docs/TECHNICAL_DESIGN.md), but those documents include
@@ -457,8 +539,8 @@ If you use Open Science Desktop in your research, please cite it:
   author  = {{The Open Science Desktop Contributors}},
   title   = {Open Science Desktop: a local-first, model-agnostic AI research workbench},
   year    = {2026},
-  version = {0.5.1},
-  doi     = {10.5281/zenodo.22004919},
+  version = {0.6.0},
+  doi     = {10.5281/zenodo.22656009},
   url     = {https://github.com/ai4s-research/open-science},
   license = {MIT}
 }
@@ -470,6 +552,8 @@ GitHub's **"Cite this repository"** button (top of the repo page, generated from
 ## License
 
 [MIT](./LICENSE). Bundled third-party skills and connectors keep their own licenses.
+
+Computer use is a port of the design and native providers from [Orca](https://github.com/stablyai/orca) (MIT) — an accessibility-tree-first approach, with an explicit verified/unverified result on every action, that is simply the right way to build this. Our thanks to that team for doing it well and giving it away.
 
 > Open Science Desktop is beta research tooling. Treat outputs as drafts: verify numbers,
 > citations, code, and conclusions before publication or decision-making.

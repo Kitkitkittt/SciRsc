@@ -1,0 +1,54 @@
+--- a/paper-writer/SKILL.md
++++ b/paper-writer/SKILL.md
+@@ -93,4 +93,15 @@
+ #### 3.2 Figures — 4–8 publication-grade
+ 
++**Mandatory:** Load `publication-figures` before planning or drawing figures;
++require every delegated figure agent to load it and follow these same rules.
++Use its FigTree schematic workflow; illustrated reference-led overviews are the default for method/proposal overviews.
++Before drawing these overviews, read the `publication-figures` companion `illustrated-overviews.md`;
++inspect actual reference PNGs (not article prose) to guide composition.
++Assess reference likeness separately from the content/layout pass.
++Display one style preview and obtain user approval before bulk redesign.
++Preserve data plots from decoration; use its chart rules for data-backed quantitative plots, not schematic layouts.
++Apply its render-inspect-repair loop and final-size gate to every figure.
++Explicit user or venue visual requirements override aesthetic defaults only, never grounding or readability gates.
++
+ **Open:** `references/02-figures-publication-grade.md`.
+ 
+--- a/literature-survey/SKILL.md
++++ b/literature-survey/SKILL.md
+@@ -86,4 +86,15 @@
+ #### 3.2 Figures — 6–10 survey-shaped
+ 
++**Mandatory:** Load `publication-figures` before planning or drawing figures;
++require every delegated figure agent to load it and follow these same rules.
++Use its FigTree schematic workflow; illustrated reference-led overviews are the default for method/proposal overviews.
++Before drawing these overviews, read the `publication-figures` companion `illustrated-overviews.md`;
++inspect actual reference PNGs (not article prose) to guide composition.
++Assess reference likeness separately from the content/layout pass.
++Display one style preview and obtain user approval before bulk redesign.
++Preserve data plots from decoration; use its chart rules for data-backed quantitative plots, not schematic layouts.
++Apply its render-inspect-repair loop and final-size gate to every figure.
++Explicit user or venue visual requirements override aesthetic defaults only, never grounding or readability gates.
++
+ **Open:** `references/02-survey-figures.md`.
+ 
+--- a/experiment-suite/SKILL.md
++++ b/experiment-suite/SKILL.md
+@@ -103,4 +103,15 @@
+ #### 3.4 Figures — 3–6 publication-grade
+ 
++**Mandatory:** Load `publication-figures` before planning or drawing figures;
++require every delegated figure agent to load it and follow these same rules.
++Use its FigTree schematic workflow; illustrated reference-led overviews are the default for method/proposal overviews.
++Before drawing these overviews, read the `publication-figures` companion `illustrated-overviews.md`;
++inspect actual reference PNGs (not article prose) to guide composition.
++Assess reference likeness separately from the content/layout pass.
++Display one style preview and obtain user approval before bulk redesign.
++Preserve data plots from decoration; use its chart rules for data-backed quantitative plots, not schematic layouts.
++Apply its render-inspect-repair loop and final-size gate to every figure.
++Explicit user or venue visual requirements override aesthetic defaults only, never grounding or readability gates.
++
+ **Open:** `references/04-publication-figures.md`, `references/04a-figure-contract.md`, `references/04b-figure-qa.md`, and `figure_examples/`. Before writing plotting code, define the figure contract in a small working note under `$RUN/figures/figure_contract.md`:
+ 

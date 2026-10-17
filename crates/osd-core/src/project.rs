@@ -581,6 +581,23 @@ pub fn is_registered_project_path(env: &Env, path: &Path) -> bool {
     })
 }
 
+/// Whether `path` (canonical) sits inside a registered project's workspace —
+/// its root or anything under it. A file ticket names a file, not a session
+/// directory, so it needs this rather than `is_registered_project_path`'s
+/// exact-root match: an in-place project lives outside the base directory.
+pub fn is_inside_registered_project(env: &Env, path: &Path) -> bool {
+    let Ok(base) = base_workspace_dir(env) else {
+        return false;
+    };
+    project_dirs(&base).into_iter().any(|dir| {
+        let Some(meta) = read_meta(&dir) else {
+            return false;
+        };
+        let target = meta.source_path.map(PathBuf::from).unwrap_or(dir);
+        target.canonicalize().map(|p| path.starts_with(p)).unwrap_or(false)
+    })
+}
+
 /// Rename the project's display name only — keyed by project id, since an
 /// imported project's metadata lives in its base-dir stub, not at its (external)
 /// workspace path. The folder never moves, so session `directory` grouping stays
@@ -677,7 +694,10 @@ mod tests {
         // What set_workspace persists, and workspace_dir reads back, for the
         // folder the sidebar's "+" hands it (`startDraftInWorkspace(p.path)`) —
         // it canonicalizes, and the layout call returns the dir unchanged.
-        let switched = dir.canonicalize().unwrap().to_string_lossy().to_string();
+        // Both sides are normalized to the native form (`native_path` strips
+        // the `\\?\` verbatim prefix on Windows), the same string OpenCode
+        // reports as a session's directory.
+        let switched = super::super::artifact_file::native_path(&dir.canonicalize().unwrap());
 
         assert_eq!(reported, switched, "a session started in a project must map back to it");
 
@@ -810,7 +830,9 @@ mod tests {
         let info = info_of(reloaded, &stub);
         assert!(info.imported);
         assert_eq!(info.import_mode.as_deref(), Some("in-place"));
-        assert_eq!(info.path, ext.canonicalize().unwrap().to_string_lossy());
+        // The reported path is the native form (no `\\?\` prefix on Windows),
+        // like every path the app hands to OpenCode — see native_path (#76).
+        assert_eq!(info.path, super::super::artifact_file::native_path(&ext.canonicalize().unwrap()));
 
         // Nothing was written into the user's repo (metadata lives in the stub).
         assert!(!ext.join(".openscience").join("project.json").exists());
@@ -820,7 +842,7 @@ mod tests {
         let own_info = info_of(read_meta(&own).unwrap(), &own);
         assert!(!own_info.imported);
         assert_eq!(own_info.import_mode, None);
-        assert_eq!(own_info.path, own.canonicalize().unwrap().to_string_lossy());
+        assert_eq!(own_info.path, super::super::artifact_file::native_path(&own.canonicalize().unwrap()));
         let _ = own_meta;
 
         let _ = fs::remove_dir_all(&base);
