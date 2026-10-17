@@ -1,5 +1,13 @@
 # Progress
 
+2026-09-08 · skills: made reference-led illustrated composition the default for method/proposal overviews, added a companion workflow with real-image art direction, style-proof approval and independent integrity/likeness gates, and synchronized core/report/draw.io routing across source, release and installed files; patch dry-run, lint and typecheck passed. Lesson: technical cleanliness does not establish reference likeness; the previous blanket flat-style rules contradicted the requested illustrated references. Regression cases were reviewed at instruction level, not validated through new image generation.
+
+2026-09-07 20:02 · skills: adapted publication-figures to FigTree-style editable schematics and mandatory dual-view repair, wired three report skills and draw.io routing, preserved report pointers through a checked fetch patch, and synchronized active release/installed skill docs; shell syntax, patch dry-run, lint, and typecheck passed. Lesson: installed skills are overwritten from release resources on restart, not directly from repository sources. Existing report figures were not regenerated.
+
+2026-09-04 11:43 · chore(runtime): upgraded the bundled OpenCode runtime and matching plugin SDK from 1.18.18 to 1.18.27, rebuilt the Linux release, and verified 1,166 frontend tests, lint, typecheck, authenticated core HTTP endpoints, SSE, native ready state, clean shutdown, and no plugin errors.
+
+2026-09-03 20:25 · setup(linux): added an executable root launch script that starts the release desktop, which owns startup and shutdown of its bundled OpenCode runtime and services; shell syntax, bounded native launch, and typecheck passed.
+
 2026-09-03 19:25 · setup(linux): installed the native Tauri toolchain and pinned runtime resources, built and launched the release desktop with its OpenCode sidecar, and verified lint, typecheck, 252 Rust tests, and Clippy; the sole filtered SSH transport test and Rust 1.98 formatting drift are host/baseline issues and do not block the working application.
 
 2026-09-03 18:20 · setup: configured GitHub issue tracking, canonical triage labels, multi-context domain routing, and explicit upstream maintenance rules for the public Kitkitkittt/SciRsc repository.

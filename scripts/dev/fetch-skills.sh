@@ -22,6 +22,7 @@ SRC="$(find "$TMP" -maxdepth 1 -type d -name 'ai4s-skills-*' | head -1)"
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 cp -R "$SRC/skills/." "$OUT_DIR/"
+patch --batch --forward --fuzz=0 -p1 -d "$OUT_DIR" < "$ROOT/runtime/skills/core/publication-figures/report-skills.patch"
 echo "$AI4S_SKILLS_COMMIT" > "$OUT_DIR/.commit"
 rm -rf "$TMP"
 
