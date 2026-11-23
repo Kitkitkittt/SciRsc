@@ -21,7 +21,18 @@ If a `swarm-ready` skill is installed, load it. Otherwise execute the documented
 
 ## Repository starting point
 
-Read: [AGENTS.md](AGENTS.md), [README.md](README.md), [CONTEXT-MAP.md](CONTEXT-MAP.md), [PROGRESS.md](PROGRESS.md), [package.json](package.json), [Cargo.toml](Cargo.toml), [docs](docs), [scripts](scripts), [.github](.github).
+Read [AGENTS.md](AGENTS.md) and route through [CONTEXT-MAP.md](CONTEXT-MAP.md)
+to the affected context. `CLAUDE.md` is a symlink to `AGENTS.md`; maintain the
+pointer and the rules in `AGENTS.md` only. Follow the
+[local issue tracker rules](docs/agents/issue-tracker.md) and record verified
+milestones in [PROGRESS.md](PROGRESS.md).
+
+This documentation slice is [issue #4](https://github.com/Kitkitkittt/SciRsc/issues/4)
+on the existing branch for [PR #3](https://github.com/Kitkitkittt/SciRsc/pull/3).
+The v0.6.0 upgrade ([issue #1](https://github.com/Kitkitkittt/SciRsc/issues/1),
+[PR #2](https://github.com/Kitkitkittt/SciRsc/pull/2)) owns its own branch and
+runtime evidence. Follow the [upstream maintenance rules](docs/agents/upstream.md)
+for that work, not this documentation PR.
 
 Select one bounded workspace, SDK or research-workflow issue and preserve the existing desktop/gateway architecture.
 
@@ -41,14 +52,38 @@ The base above is an inspection snapshot, not a permanent working branch. Refres
 
 ## Verification starting point
 
-| Declared command | Source and limit |
-| --- | --- |
-| `pnpm run build` | package.json scripts; inspect hooks and select a bounded, non-watch invocation |
-| `pnpm run test` | package.json scripts; inspect hooks and select a bounded, non-watch invocation |
-| `pnpm run typecheck` | package.json scripts; inspect hooks and select a bounded, non-watch invocation |
-| `pnpm run lint` | package.json scripts; inspect hooks and select a bounded, non-watch invocation |
+**Documentation checks for PR #3.** From the repository root, confirm the
+agent pointer and reciprocal link, review the command map against both package
+manifests, and check the diff for whitespace:
 
-These commands were read from source, not executed for this documentation change. Build, syntax and lint success are not functional acceptance. Confirm the current setup, lockfile, hooks, required services and focused test scope before running.
+```sh
+git ls-files --error-unmatch -- AGENTS.md CLAUDE.md SWARM_READY.md \
+  CONTEXT-MAP.md PROGRESS.md docs/agents/issue-tracker.md docs/agents/upstream.md \
+  package.json apps/desktop/package.json .github/workflows/build.yml \
+  .github/workflows/finalize-macos-notarization.yml
+git ls-tree HEAD -- CLAUDE.md
+git show HEAD:CLAUDE.md
+git diff --check
+```
+
+Expect both link directions to resolve, `CLAUDE.md` to have mode `120000`
+with target `AGENTS.md`, and `git diff --check` to produce no output and exit 0.
+
+**For separately scoped application changes.** The [workspace manifest](package.json)
+declares Node 20+ and pnpm 9.4.0; root scripts target `@ai4s/desktop`. The
+[desktop manifest](apps/desktop/package.json) expands them as follows:
+
+| Command | Desktop action |
+| --- | --- |
+| `pnpm run lint` | ESLint |
+| `pnpm run typecheck` | TypeScript `tsc --noEmit` |
+| `pnpm run test` | Non-watch `vitest run` |
+| `pnpm run build` | TypeScript check, ACP server bundle, then Vite build |
+
+Use these commands only when applicable to that change; they are not release,
+Tauri startup, gateway, or cross-platform acceptance. This documentation slice
+requires no dependency install, app build, live gateway, or provider connection.
+Do not run the release or notarization workflows for it.
 
 ## Required handoff result
 
