@@ -7,6 +7,8 @@ workbench for macOS, Windows & Linux." Formerly Open Science. Bundle identifier 
 Project rules and working context for AI agents (Claude Code, Cursor, Codex, etc.).
 `CLAUDE.md` is a symlink to this file — edit only `AGENTS.md`.
 
+For `swarm ready` work, use the [scoped handoff and verification commands](SWARM_READY.md).
+
 ## Design principles
 
 Keep it **simple, explicit, clear, complete**.
